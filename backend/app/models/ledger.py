@@ -90,7 +90,7 @@ class ImmutableLedger(Base):
     balance_after = Column(Numeric(18, 4), nullable=True)
 
     # Datos adicionales (cifrados si son sensibles)
-    metadata = Column(JSONB, nullable=True)
+    extra_data = Column(JSONB, nullable=True)
 
     # Contexto de auditoría
     ip_address = Column(INET, nullable=True)
@@ -182,7 +182,7 @@ class ImmutableLedger(Base):
         investment_id: Optional[uuid.UUID] = None,
         currency: str = "MXN",
         balance_after: Optional[Decimal] = None,
-        metadata: Optional[Dict] = None,
+        extra_data: Optional[Dict] = None,
         description: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
@@ -229,7 +229,7 @@ class ImmutableLedger(Base):
             amount=amount,
             currency=currency,
             balance_after=balance_after,
-            metadata=metadata,
+            extra_data=extra_data,
             description=description,
             ip_address=ip_address,
             user_agent=user_agent,
