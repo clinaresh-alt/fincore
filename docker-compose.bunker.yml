@@ -1,0 +1,207 @@
+version: '3.8'
+
+# FinCore - Arquitectura Bunker
+# Despliegue de alta seguridad con Zero Trust
+
+services:
+  # ===========================================
+  # CAPA 1: API GATEWAY (Punto de entrada)
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    container_name: fincore-gateway
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend-python
+      - backend-go
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+  # ===========================================
+  # CAPA 2: FRONTEND (Next.js)
+  # ===========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fincore-frontend
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://api.fincore.app
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+  # ===========================================
+  # CAPA 3: BACKEND SERVICES
+  # ===========================================
+
+  # Motor de Calculo (Python/FastAPI)
+  backend-python:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fincore-calculation-engine
+    environment:
+      - DATABASE_URL=postgresql://fincore:${DB_PASSWORD}@postgres:5432/fincore
+      - REDIS_URL=redis://redis:6379/0
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - ENVIRONMENT=production
+    depends_on:
+      - postgres
+      - redis
+      - vault
+    networks:
+      - backend-net
+      - db-net
+    restart: unless-stopped
+
+  # Core Financiero (Go)
+  backend-go:
+    build:
+      context: ./services/core-go
+      dockerfile: Dockerfile
+    container_name: fincore-core-go
+    environment:
+      - DATABASE_URL=postgresql://fincore:${DB_PASSWORD}@postgres:5432/fincore
+      - REDIS_URL=redis://redis:6379/1
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - ENABLE_MTLS=true
+      - GIN_MODE=release
+    depends_on:
+      - postgres
+      - redis
+      - vault
+    networks:
+      - backend-net
+      - db-net
+    restart: unless-stopped
+
+  # ===========================================
+  # CAPA 4: DATOS (Subred Privada)
+  # ===========================================
+
+  # PostgreSQL con Citus (distribuido)
+  postgres:
+    image: postgres:16-alpine
+    container_name: fincore-postgres
+    environment:
+      - POSTGRES_USER=fincore
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=fincore
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - db-net
+    restart: unless-stopped
+    # Sin puertos expuestos - solo accesible desde backend-net
+
+  # Redis (Cache y Sesiones)
+  redis:
+    image: redis:7-alpine
+    container_name: fincore-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - db-net
+    restart: unless-stopped
+
+  # ===========================================
+  # CAPA 5: SEGURIDAD
+  # ===========================================
+
+  # HashiCorp Vault (Gestión de Secretos)
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: fincore-vault
+    cap_add:
+      - IPC_LOCK
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TOKEN}
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/config.hcl:/vault/config/config.hcl:ro
+    networks:
+      - backend-net
+    restart: unless-stopped
+
+  # ===========================================
+  # CAPA 6: OBSERVABILIDAD
+  # ===========================================
+
+  # Prometheus (Metricas)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fincore-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - monitoring-net
+      - backend-net
+    restart: unless-stopped
+
+  # Grafana (Dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fincore-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    networks:
+      - monitoring-net
+    restart: unless-stopped
+
+# ===========================================
+# REDES (Aislamiento)
+# ===========================================
+networks:
+  frontend-net:
+    driver: bridge
+    # Solo nginx puede hablar con el frontend
+
+  backend-net:
+    driver: bridge
+    internal: true  # Sin acceso a internet
+
+  db-net:
+    driver: bridge
+    internal: true  # Sin acceso a internet - aislamiento total
+
+  monitoring-net:
+    driver: bridge
+
+# ===========================================
+# VOLUMENES (Persistencia)
+# ===========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  vault_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
