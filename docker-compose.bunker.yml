@@ -94,21 +94,23 @@ services:
   # CAPA 4: DATOS (Subred Privada)
   # ===========================================
 
-  # PostgreSQL con Citus (distribuido)
+  # PostgreSQL con Citus (Escalabilidad Distribuida)
   postgres:
-    image: postgres:16-alpine
-    container_name: fincore-postgres
+    image: citusdata/citus:12.1
+    container_name: fincore-postgres-citus
     environment:
       - POSTGRES_USER=fincore
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=fincore
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./database/citus-setup.sql:/docker-entrypoint-initdb.d/02-citus.sql:ro
     networks:
       - db-net
     restart: unless-stopped
     # Sin puertos expuestos - solo accesible desde backend-net
+    # Citus permite escalar horizontalmente agregando workers
 
   # Redis (Cache y Sesiones)
   redis:
