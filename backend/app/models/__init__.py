@@ -12,6 +12,9 @@ from app.models.feasibility import (
     FeasibilityStudy, AlertConfig, Alert, SensitivityAnalysis
 )
 from app.models.ledger import ImmutableLedger, LedgerSnapshot, LedgerEntryType
+from app.models.system_config import SystemConfig, ConfigCategory
+from app.models.sector_metrics import SectorMetrics, SECTOR_INPUT_FIELDS, SECTOR_CALCULATED_INDICATORS
+from app.models.company import Company, CompanyDocument, CompanyType, CompanyStatus, CompanyDocumentType
 
 __all__ = [
     # Core
@@ -25,6 +28,12 @@ __all__ = [
     "InvestmentTransaction",
     "Document",
     "AuditLog",
+    # Companies
+    "Company",
+    "CompanyDocument",
+    "CompanyType",
+    "CompanyStatus",
+    "CompanyDocumentType",
     # Feasibility
     "FeasibilityStudy",
     "AlertConfig",
@@ -34,4 +43,11 @@ __all__ = [
     "ImmutableLedger",
     "LedgerSnapshot",
     "LedgerEntryType",
+    # System Config
+    "SystemConfig",
+    "ConfigCategory",
+    # Sector Metrics
+    "SectorMetrics",
+    "SECTOR_INPUT_FIELDS",
+    "SECTOR_CALCULATED_INDICATORS",
 ]

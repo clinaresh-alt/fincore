@@ -124,7 +124,7 @@ export const authAPI = {
 // === PROJECTS API ===
 export const projectsAPI = {
   list: async (params?: { estado?: string; sector?: string }) => {
-    const response = await apiClient.get("/projects", { params });
+    const response = await apiClient.get("/projects/", { params });
     return response.data;
   },
 
@@ -146,7 +146,7 @@ export const projectsAPI = {
     plazo_meses: number;
     tasa_rendimiento_anual?: number;
   }) => {
-    const response = await apiClient.post("/projects", data);
+    const response = await apiClient.post("/projects/", data);
     return response.data;
   },
 
@@ -164,11 +164,150 @@ export const projectsAPI = {
     return response.data;
   },
 
+  analyzeFeasibility: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await apiClient.post("/projects/analyze-feasibility", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
+
+  getIndicatorsBySector: async (sector: string) => {
+    const response = await apiClient.get(`/projects/indicators/${sector}`);
+    return response.data;
+  },
+
   analyzeRisk: async (projectId: string, data: any) => {
     const response = await apiClient.post(
       `/projects/${projectId}/risk-analysis`,
       data
     );
+    return response.data;
+  },
+
+  update: async (id: string, data: {
+    nombre?: string;
+    descripcion?: string;
+    sector?: string;
+    monto_solicitado?: number;
+    monto_minimo_inversion?: number;
+    plazo_meses?: number;
+    fecha_inicio_estimada?: string;
+    fecha_fin_estimada?: string;
+    tasa_rendimiento_anual?: number;
+    rendimiento_proyectado?: number;
+    empresa_solicitante?: string;
+    tiene_documentacion_completa?: boolean;
+  }) => {
+    const response = await apiClient.put(`/projects/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: string) => {
+    await apiClient.delete(`/projects/${id}`);
+  },
+
+  // Indicadores del sector
+  getIndicators: async (projectId: string) => {
+    const response = await apiClient.get(`/projects/${projectId}/indicators`);
+    return response.data;
+  },
+
+  saveIndicators: async (projectId: string, data: Record<string, any>) => {
+    const response = await apiClient.post(`/projects/${projectId}/indicators`, data);
+    return response.data;
+  },
+
+  updateIndicators: async (projectId: string, data: Record<string, any>) => {
+    const response = await apiClient.put(`/projects/${projectId}/indicators`, data);
+    return response.data;
+  },
+
+  deleteIndicators: async (projectId: string) => {
+    await apiClient.delete(`/projects/${projectId}/indicators`);
+  },
+
+  // Obtener evaluacion completa del proyecto
+  getEvaluation: async (projectId: string) => {
+    const response = await apiClient.get(`/projects/${projectId}/evaluation`);
+    return response.data;
+  },
+};
+
+// === COMPANIES API ===
+export const companiesAPI = {
+  list: async (params?: { estado?: string; sector?: string; search?: string; page?: number; page_size?: number }) => {
+    const response = await apiClient.get("/companies/", { params });
+    return response.data;
+  },
+
+  get: async (id: string) => {
+    const response = await apiClient.get(`/companies/${id}`);
+    return response.data;
+  },
+
+  getTypes: async () => {
+    const response = await apiClient.get("/companies/types");
+    return response.data;
+  },
+
+  create: async (data: Record<string, any>) => {
+    const response = await apiClient.post("/companies/", data);
+    return response.data;
+  },
+
+  update: async (id: string, data: Record<string, any>) => {
+    const response = await apiClient.put(`/companies/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: string) => {
+    await apiClient.delete(`/companies/${id}`);
+  },
+
+  updateVerification: async (id: string, data: { estado_verificacion: string; notas_verificacion?: string; score_riesgo?: number }) => {
+    const response = await apiClient.put(`/companies/${id}/verification`, data);
+    return response.data;
+  },
+
+  // Documents
+  listDocuments: async (companyId: string, tipo?: string) => {
+    const response = await apiClient.get(`/companies/${companyId}/documents`, { params: { tipo } });
+    return response.data;
+  },
+
+  uploadDocument: async (companyId: string, file: File, data: { tipo: string; descripcion?: string; fecha_emision?: string; fecha_vencimiento?: string }) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("tipo", data.tipo);
+    if (data.descripcion) formData.append("descripcion", data.descripcion);
+    if (data.fecha_emision) formData.append("fecha_emision", data.fecha_emision);
+    if (data.fecha_vencimiento) formData.append("fecha_vencimiento", data.fecha_vencimiento);
+
+    const response = await apiClient.post(`/companies/${companyId}/documents`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  },
+
+  getDocument: async (companyId: string, documentId: string) => {
+    const response = await apiClient.get(`/companies/${companyId}/documents/${documentId}`);
+    return response.data;
+  },
+
+  updateDocument: async (companyId: string, documentId: string, data: Record<string, any>) => {
+    const response = await apiClient.put(`/companies/${companyId}/documents/${documentId}`, data);
+    return response.data;
+  },
+
+  deleteDocument: async (companyId: string, documentId: string) => {
+    await apiClient.delete(`/companies/${companyId}/documents/${documentId}`);
+  },
+
+  // Projects
+  listProjects: async (companyId: string) => {
+    const response = await apiClient.get(`/companies/${companyId}/projects`);
     return response.data;
   },
 };

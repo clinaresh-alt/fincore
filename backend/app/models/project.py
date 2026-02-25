@@ -88,7 +88,14 @@ class Project(Base):
 
     # Solicitante
     solicitante_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
-    empresa_solicitante = Column(String(255), nullable=True)
+    empresa_solicitante = Column(String(255), nullable=True)  # Nombre (legacy)
+
+    # Empresa asociada (nueva relacion)
+    empresa_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("empresas.id", ondelete="SET NULL"),
+        nullable=True
+    )
 
     # Documentacion
     tiene_documentacion_completa = Column(Boolean, default=False)
@@ -102,6 +109,7 @@ class Project(Base):
     riesgo = relationship("RiskAnalysis", back_populates="project", uselist=False)
     flujos_caja = relationship("CashFlow", back_populates="project", order_by="CashFlow.periodo_nro")
     inversiones = relationship("Investment", back_populates="project")
+    empresa = relationship("Company", back_populates="proyectos")
 
     __table_args__ = (
         Index("idx_proyecto_estado", "estado"),
@@ -260,3 +268,86 @@ class CashFlow(Base):
 
     def __repr__(self):
         return f"<CashFlow P{self.periodo_nro}: {self.flujo_neto}>"
+
+
+class SectorIndicators(Base):
+    """
+    Indicadores especificos del sector para cada proyecto.
+    Metricas clave dependientes del tipo de industria.
+    """
+    __tablename__ = "indicadores_sector"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    proyecto_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("proyectos.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False
+    )
+
+    # --- Indicadores de Tecnologia/SaaS ---
+    ltv_cac_ratio = Column(Numeric(10, 4), nullable=True)       # Ratio LTV/CAC
+    burn_rate = Column(Numeric(18, 2), nullable=True)           # Tasa de quema mensual
+    runway_meses = Column(Integer, nullable=True)               # Runway en meses
+    mrr = Column(Numeric(18, 2), nullable=True)                 # Monthly Recurring Revenue
+    arr = Column(Numeric(18, 2), nullable=True)                 # Annual Recurring Revenue
+    churn_rate = Column(Numeric(7, 4), nullable=True)           # Tasa de cancelacion
+    nps = Column(Integer, nullable=True)                        # Net Promoter Score (-100 a 100)
+
+    # --- Indicadores Inmobiliario ---
+    cap_rate = Column(Numeric(7, 4), nullable=True)             # Tasa de capitalizacion
+    precio_m2 = Column(Numeric(18, 2), nullable=True)           # Precio por metro cuadrado
+    yield_bruto = Column(Numeric(7, 4), nullable=True)          # Rendimiento bruto anual
+    yield_neto = Column(Numeric(7, 4), nullable=True)           # Rendimiento neto anual
+    loan_to_value = Column(Numeric(7, 4), nullable=True)        # Relacion prestamo/valor
+    debt_service_coverage = Column(Numeric(7, 4), nullable=True)  # DSCR
+
+    # --- Indicadores Energia ---
+    lcoe = Column(Numeric(18, 4), nullable=True)                # Levelized Cost of Energy
+    factor_capacidad = Column(Numeric(7, 4), nullable=True)     # Factor de capacidad
+    ingresos_kwh = Column(Numeric(10, 4), nullable=True)        # Ingresos por kWh
+    costo_instalacion_kw = Column(Numeric(18, 2), nullable=True)  # Costo instalacion por kW
+    vida_util_anos = Column(Integer, nullable=True)             # Vida util del proyecto
+
+    # --- Indicadores Fintech ---
+    take_rate = Column(Numeric(7, 4), nullable=True)            # Porcentaje comision transaccion
+    volumen_procesado = Column(Numeric(18, 2), nullable=True)   # TPV mensual
+    costo_adquisicion = Column(Numeric(18, 2), nullable=True)   # CAC
+    lifetime_value = Column(Numeric(18, 2), nullable=True)      # LTV
+    default_rate = Column(Numeric(7, 4), nullable=True)         # Tasa de incumplimiento
+
+    # --- Indicadores Comercio/Industrial ---
+    margen_bruto = Column(Numeric(7, 4), nullable=True)         # Margen bruto
+    margen_operativo = Column(Numeric(7, 4), nullable=True)     # Margen operativo
+    rotacion_inventario = Column(Numeric(7, 2), nullable=True)  # Veces que rota al ano
+    ticket_promedio = Column(Numeric(18, 2), nullable=True)     # Valor promedio transaccion
+    conversion_rate = Column(Numeric(7, 4), nullable=True)      # Tasa de conversion
+    ventas_m2 = Column(Numeric(18, 2), nullable=True)           # Ventas por metro cuadrado
+    utilizacion_capacidad = Column(Numeric(7, 4), nullable=True)  # % uso capacidad instalada
+    costo_unitario = Column(Numeric(18, 4), nullable=True)      # Costo por unidad
+    punto_equilibrio_unidades = Column(Integer, nullable=True)  # Unidades para break-even
+
+    # --- Indicadores Agrotech ---
+    rendimiento_hectarea = Column(Numeric(18, 4), nullable=True)  # Rendimiento por hectarea
+    costo_produccion_ton = Column(Numeric(18, 2), nullable=True)  # Costo por tonelada
+    punto_equilibrio = Column(Numeric(18, 2), nullable=True)      # Punto de equilibrio
+
+    # --- Indicadores Infraestructura ---
+    eirr = Column(Numeric(7, 4), nullable=True)                 # Economic IRR
+    firr = Column(Numeric(7, 4), nullable=True)                 # Financial IRR
+    beneficio_costo_ratio = Column(Numeric(7, 4), nullable=True)  # B/C Ratio
+    trafico_proyectado = Column(Integer, nullable=True)         # Usuarios/vehiculos
+    tarifa_promedio = Column(Numeric(18, 2), nullable=True)     # Tarifa promedio
+
+    # --- Indicadores Servicios ---
+    rotacion_clientes = Column(Numeric(7, 4), nullable=True)    # Tasa rotacion clientes
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), onupdate=datetime.utcnow)
+
+    # Relacion
+    project = relationship("Project", backref="indicadores_sector")
+
+    def __repr__(self):
+        return f"<SectorIndicators proyecto_id={self.proyecto_id}>"

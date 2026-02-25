@@ -12,6 +12,7 @@ import {
   LogOut,
   Shield,
   Building2,
+  Users,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,12 @@ const navigation = [
     href: "/projects",
     icon: Building2,
     roles: ["Inversionista", "Analista", "Admin"],
+  },
+  {
+    name: "Empresas",
+    href: "/companies",
+    icon: Users,
+    roles: ["Cliente", "Analista", "Admin"],
   },
   {
     name: "Mis Inversiones",

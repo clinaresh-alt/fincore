@@ -75,6 +75,7 @@ class User(Base):
         primaryjoin="User.id==Document.user_id"
     )
     audit_logs = relationship("AuditLog", back_populates="user")
+    companies = relationship("Company", back_populates="user", foreign_keys="Company.user_id")
 
     def __repr__(self):
         return f"<User {self.email}>"

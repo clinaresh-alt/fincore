@@ -18,7 +18,7 @@ from app.core.database import Base
 from app.models import (
     User, UserProfile, Project, FinancialEvaluation,
     RiskAnalysis, CashFlow, Investment, InvestmentTransaction,
-    Document, AuditLog
+    Document, AuditLog, Company, CompanyDocument
 )
 
 # Alembic Config object
