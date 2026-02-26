@@ -39,6 +39,33 @@ class ProjectCreate(BaseModel):
         }
 
 
+class ProjectUpdate(BaseModel):
+    """Schema para actualizar proyecto."""
+    nombre: Optional[str] = Field(None, min_length=3, max_length=255)
+    descripcion: Optional[str] = None
+    sector: Optional[str] = None
+    monto_solicitado: Optional[Decimal] = Field(None, gt=0)
+    monto_minimo_inversion: Optional[Decimal] = Field(None, gt=0)
+    plazo_meses: Optional[int] = Field(None, ge=1, le=360)
+    fecha_inicio_estimada: Optional[datetime] = None
+    fecha_fin_estimada: Optional[datetime] = None
+    tasa_rendimiento_anual: Optional[Decimal] = Field(None, ge=0, le=1)
+    rendimiento_proyectado: Optional[Decimal] = None
+    empresa_solicitante: Optional[str] = None
+    tiene_documentacion_completa: Optional[bool] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "nombre": "Nuevo nombre del proyecto",
+                "descripcion": "Nueva descripcion",
+                "monto_solicitado": 6000000.00,
+                "monto_minimo_inversion": 10000.00,
+                "rendimiento_proyectado": 750000.00
+            }
+        }
+
+
 class ProjectResponse(BaseModel):
     """Respuesta con datos de proyecto."""
     id: UUID
@@ -47,9 +74,15 @@ class ProjectResponse(BaseModel):
     sector: str
     monto_solicitado: Decimal
     monto_financiado: Decimal
+    monto_minimo_inversion: Optional[Decimal] = None
     plazo_meses: int
+    fecha_inicio_estimada: Optional[datetime] = None
+    fecha_fin_estimada: Optional[datetime] = None
     estado: str
     tasa_rendimiento_anual: Optional[Decimal]
+    rendimiento_proyectado: Optional[Decimal] = None
+    empresa_solicitante: Optional[str] = None
+    tiene_documentacion_completa: Optional[bool] = None
     created_at: datetime
 
     class Config:
@@ -161,3 +194,84 @@ class ProjectAnalyticsResponse(BaseModel):
 
     # Inversionistas
     total_inversionistas: int
+
+
+class SectorIndicatorsBase(BaseModel):
+    """Schema base para indicadores del sector."""
+    # --- Tecnologia/SaaS ---
+    ltv_cac_ratio: Optional[Decimal] = None
+    burn_rate: Optional[Decimal] = None
+    runway_meses: Optional[int] = None
+    mrr: Optional[Decimal] = None
+    arr: Optional[Decimal] = None
+    churn_rate: Optional[Decimal] = None
+    nps: Optional[int] = None
+
+    # --- Inmobiliario ---
+    cap_rate: Optional[Decimal] = None
+    precio_m2: Optional[Decimal] = None
+    yield_bruto: Optional[Decimal] = None
+    yield_neto: Optional[Decimal] = None
+    loan_to_value: Optional[Decimal] = None
+    debt_service_coverage: Optional[Decimal] = None
+
+    # --- Energia ---
+    lcoe: Optional[Decimal] = None
+    factor_capacidad: Optional[Decimal] = None
+    ingresos_kwh: Optional[Decimal] = None
+    costo_instalacion_kw: Optional[Decimal] = None
+    vida_util_anos: Optional[int] = None
+
+    # --- Fintech ---
+    take_rate: Optional[Decimal] = None
+    volumen_procesado: Optional[Decimal] = None
+    costo_adquisicion: Optional[Decimal] = None
+    lifetime_value: Optional[Decimal] = None
+    default_rate: Optional[Decimal] = None
+
+    # --- Comercio/Industrial ---
+    margen_bruto: Optional[Decimal] = None
+    margen_operativo: Optional[Decimal] = None
+    rotacion_inventario: Optional[Decimal] = None
+    ticket_promedio: Optional[Decimal] = None
+    conversion_rate: Optional[Decimal] = None
+    ventas_m2: Optional[Decimal] = None
+    utilizacion_capacidad: Optional[Decimal] = None
+    costo_unitario: Optional[Decimal] = None
+    punto_equilibrio_unidades: Optional[int] = None
+
+    # --- Agrotech ---
+    rendimiento_hectarea: Optional[Decimal] = None
+    costo_produccion_ton: Optional[Decimal] = None
+    punto_equilibrio: Optional[Decimal] = None
+
+    # --- Infraestructura ---
+    eirr: Optional[Decimal] = None
+    firr: Optional[Decimal] = None
+    beneficio_costo_ratio: Optional[Decimal] = None
+    trafico_proyectado: Optional[int] = None
+    tarifa_promedio: Optional[Decimal] = None
+
+    # --- Servicios ---
+    rotacion_clientes: Optional[Decimal] = None
+
+
+class SectorIndicatorsCreate(SectorIndicatorsBase):
+    """Schema para crear indicadores del sector."""
+    proyecto_id: UUID
+
+
+class SectorIndicatorsUpdate(SectorIndicatorsBase):
+    """Schema para actualizar indicadores del sector."""
+    pass
+
+
+class SectorIndicatorsResponse(SectorIndicatorsBase):
+    """Respuesta con indicadores del sector."""
+    id: UUID
+    proyecto_id: UUID
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

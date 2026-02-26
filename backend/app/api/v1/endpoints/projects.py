@@ -4,26 +4,28 @@ Motor de calculo de VAN, TIR, Credit Scoring.
 """
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.api.v1.endpoints.auth import get_current_user, require_role
+from app.api.v1.endpoints.auth import get_current_user, get_current_user_optional, require_role
 from app.models.user import User, UserRole
 from app.models.project import (
     Project, ProjectStatus, FinancialEvaluation,
-    RiskAnalysis, CashFlow, RiskLevel
+    RiskAnalysis, CashFlow, RiskLevel, SectorIndicators
 )
 from app.models.audit import AuditLog, AuditAction
 from app.schemas.project import (
-    ProjectCreate, ProjectResponse, ProjectEvaluate,
-    EvaluationResponse, RiskAnalysisResponse, ProjectAnalyticsResponse
+    ProjectCreate, ProjectUpdate, ProjectResponse, ProjectEvaluate,
+    EvaluationResponse, RiskAnalysisResponse, ProjectAnalyticsResponse,
+    SectorIndicatorsCreate, SectorIndicatorsUpdate, SectorIndicatorsResponse
 )
 from app.services.financial_engine import FinancialEngine
 from app.services.risk_engine import RiskEngine
+from app.services.feasibility_analyzer import FeasibilityAnalyzer
 
 router = APIRouter(prefix="/projects", tags=["Proyectos"])
 
@@ -70,25 +72,29 @@ async def create_project(
 
 @router.get("/", response_model=List[ProjectResponse])
 async def list_projects(
+    request: Request,
     estado: Optional[str] = Query(None, description="Filtrar por estado"),
     sector: Optional[str] = Query(None, description="Filtrar por sector"),
     skip: int = 0,
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
     Lista proyectos disponibles.
-    Inversionistas ven solo proyectos aprobados/financiando.
+    - Usuarios no autenticados: solo proyectos aprobados/financiando (publicos)
+    - Inversionistas: solo proyectos aprobados/financiando
+    - Admin/Analista: todos los proyectos
     """
     query = db.query(Project)
 
-    # Filtro por rol
-    if current_user.rol == UserRole.INVERSIONISTA:
+    # Filtro por rol (si no autenticado, trata como inversionista)
+    if not current_user or current_user.rol == UserRole.INVERSIONISTA:
         query = query.filter(
             Project.estado.in_([
                 ProjectStatus.APROBADO,
-                ProjectStatus.FINANCIANDO
+                ProjectStatus.FINANCIANDO,
+                ProjectStatus.FINANCIADO
             ])
         )
 
@@ -117,6 +123,99 @@ async def get_project(
         )
 
     return project
+
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: UUID,
+    project_data: ProjectUpdate,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.ANALISTA])),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza un proyecto existente.
+    Solo Admin y Analista pueden editar proyectos.
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proyecto no encontrado"
+        )
+
+    # Solo actualizar campos que fueron enviados (no None)
+    update_data = project_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if value is not None:
+            setattr(project, field, value)
+
+    db.commit()
+    db.refresh(project)
+
+    # Audit
+    audit = AuditLog(
+        user_id=current_user.id,
+        action=AuditAction.PROJECT_MODIFIED,
+        resource_type="Project",
+        resource_id=project.id,
+        description=f"Proyecto actualizado: {project.nombre}",
+        new_values=update_data
+    )
+    db.add(audit)
+    db.commit()
+
+    return project
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: Session = Depends(get_db)
+):
+    """
+    Elimina un proyecto.
+    Solo Admin puede eliminar proyectos.
+    """
+    project = db.query(Project).filter(Project.id == project_id).first()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proyecto no encontrado"
+        )
+
+    # Verificar que no tenga inversiones activas
+    from app.models.investment import Investment
+    investments = db.query(Investment).filter(Investment.proyecto_id == project_id).count()
+    if investments > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No se puede eliminar: el proyecto tiene {investments} inversiones asociadas"
+        )
+
+    project_name = project.nombre
+
+    # Eliminar evaluaciones y flujos de caja relacionados
+    db.query(FinancialEvaluation).filter(FinancialEvaluation.proyecto_id == project_id).delete()
+    db.query(RiskAnalysis).filter(RiskAnalysis.proyecto_id == project_id).delete()
+    db.query(CashFlow).filter(CashFlow.proyecto_id == project_id).delete()
+
+    # Eliminar proyecto
+    db.delete(project)
+    db.commit()
+
+    # Audit
+    audit = AuditLog(
+        user_id=current_user.id,
+        action=AuditAction.PROJECT_DELETED,
+        resource_type="Project",
+        resource_id=project_id,
+        description=f"Proyecto eliminado: {project_name}"
+    )
+    db.add(audit)
+    db.commit()
 
 
 @router.post("/evaluate", response_model=EvaluationResponse)
@@ -608,3 +707,419 @@ async def get_project_analytics(
         porcentaje_financiado=porcentaje,
         total_inversionistas=total_investors
     )
+
+
+@router.post("/analyze-feasibility")
+async def analyze_feasibility_study(
+    file: UploadFile = File(..., description="Archivo PDF del estudio de factibilidad"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Analiza un estudio de factibilidad PDF con IA.
+    Extrae automaticamente:
+    - Datos basicos del proyecto
+    - Configuracion financiera
+    - Flujos de caja proyectados
+    - Indicadores pre-calculados
+    """
+    # Validar tipo de archivo
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se permiten archivos PDF"
+        )
+
+    # Validar tamano (max 10MB)
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo excede el limite de 10MB"
+        )
+
+    try:
+        analyzer = FeasibilityAnalyzer(db_session=db)
+
+        # Verificar si hay API key configurada
+        if not analyzer.client:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="API key de Anthropic no configurada. Ve a Administracion > Configuracion del Sistema para configurarla."
+            )
+
+        extracted_data = await analyzer.analyze_pdf(content)
+
+        # Obtener indicadores relevantes segun sector
+        indicators = FeasibilityAnalyzer.get_indicators_for_project_type(extracted_data.sector)
+
+        return {
+            "success": True,
+            "extracted_data": {
+                "basic": {
+                    "nombre": extracted_data.nombre,
+                    "descripcion": extracted_data.descripcion,
+                    "sector": extracted_data.sector,
+                    "ubicacion": extracted_data.ubicacion,
+                    "empresa_solicitante": extracted_data.empresa_solicitante
+                },
+                "financial_config": {
+                    "inversion_inicial": float(extracted_data.inversion_inicial),
+                    "tasa_descuento": float(extracted_data.tasa_descuento),
+                    "plazo_meses": extracted_data.plazo_meses,
+                    "tasa_rendimiento_esperado": float(extracted_data.tasa_rendimiento_esperado),
+                    "tipo_periodo": extracted_data.tipo_periodo
+                },
+                "cash_flows": [
+                    {
+                        "periodo": f["periodo"],
+                        "ingresos": float(f["ingresos"]),
+                        "costos": float(f["costos"]),
+                        "descripcion": f["descripcion"]
+                    }
+                    for f in extracted_data.flujos_caja
+                ],
+                "document_indicators": {
+                    "van": float(extracted_data.van_documento) if extracted_data.van_documento else None,
+                    "tir": float(extracted_data.tir_documento) if extracted_data.tir_documento else None,
+                    "payback": extracted_data.payback_documento
+                },
+                "additional_data": extracted_data.datos_adicionales
+            },
+            "recommended_indicators": indicators,
+            "all_indicators": FeasibilityAnalyzer.get_all_extended_indicators(),
+            "extraction_confidence": extracted_data.confianza_extraccion,
+            "extraction_notes": extracted_data.notas_extraccion
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analizando documento: {str(e)}"
+        )
+
+
+@router.get("/indicators/{sector}")
+async def get_indicators_by_sector(
+    sector: str,
+    current_user: Optional[User] = Depends(get_current_user_optional)
+) -> Dict[str, Any]:
+    """
+    Obtiene los indicadores financieros relevantes para un sector especifico.
+    """
+    indicators = FeasibilityAnalyzer.get_indicators_for_project_type(sector)
+    all_indicators = FeasibilityAnalyzer.get_all_extended_indicators()
+
+    return {
+        "sector": sector,
+        "indicators": [
+            {"key": ind, "name": all_indicators.get(ind, ind)}
+            for ind in indicators
+        ],
+        "all_available": all_indicators
+    }
+
+
+@router.get("/evaluations/list")
+async def list_projects_with_evaluations(
+    estado: Optional[str] = Query(None, description="Filtrar por estado"),
+    sector: Optional[str] = Query(None, description="Filtrar por sector"),
+    skip: int = 0,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Lista proyectos con sus evaluaciones financieras completas.
+    Incluye indicadores basicos y sectoriales.
+    Para la pagina de evaluaciones.
+    """
+    query = db.query(Project)
+
+    # Filtros opcionales
+    if estado:
+        query = query.filter(Project.estado == estado)
+    if sector:
+        query = query.filter(Project.sector == sector)
+
+    total = query.count()
+    projects = query.offset(skip).limit(limit).all()
+
+    result = []
+    for project in projects:
+        # Obtener evaluacion financiera
+        evaluation = db.query(FinancialEvaluation).filter(
+            FinancialEvaluation.proyecto_id == project.id
+        ).first()
+
+        # Obtener analisis de riesgo
+        risk = db.query(RiskAnalysis).filter(
+            RiskAnalysis.proyecto_id == project.id
+        ).first()
+
+        # Obtener flujos de caja
+        cash_flows = db.query(CashFlow).filter(
+            CashFlow.proyecto_id == project.id
+        ).order_by(CashFlow.periodo_nro).all()
+
+        # Construir respuesta
+        project_data = {
+            "id": str(project.id),
+            "nombre": project.nombre,
+            "descripcion": project.descripcion,
+            "sector": project.sector.value if hasattr(project.sector, 'value') else str(project.sector),
+            "empresa_solicitante": project.empresa_solicitante,
+            "monto_solicitado": float(project.monto_solicitado),
+            "monto_financiado": float(project.monto_financiado or 0),
+            "plazo_meses": project.plazo_meses,
+            "tasa_rendimiento_anual": float(project.tasa_rendimiento_anual) if project.tasa_rendimiento_anual else None,
+            "estado": project.estado.value if hasattr(project.estado, 'value') else str(project.estado),
+            "created_at": project.created_at.isoformat() if project.created_at else None,
+            "tiene_evaluacion": evaluation is not None,
+            "tiene_analisis_riesgo": risk is not None,
+        }
+
+        # Indicadores financieros basicos
+        if evaluation:
+            project_data["evaluacion"] = {
+                "inversion_inicial": float(evaluation.inversion_inicial) if evaluation.inversion_inicial else None,
+                "tasa_descuento": float(evaluation.tasa_descuento_aplicada) if evaluation.tasa_descuento_aplicada else None,
+                "van": float(evaluation.van) if evaluation.van else None,
+                "tir": float(evaluation.tir) if evaluation.tir else None,
+                "roi": float(evaluation.roi) if evaluation.roi else None,
+                "payback_period": float(evaluation.payback_period) if evaluation.payback_period else None,
+                "indice_rentabilidad": float(evaluation.indice_rentabilidad) if evaluation.indice_rentabilidad else None,
+                "van_optimista": float(evaluation.van_optimista) if evaluation.van_optimista else None,
+                "van_pesimista": float(evaluation.van_pesimista) if evaluation.van_pesimista else None,
+                "tir_optimista": float(evaluation.tir_optimista) if evaluation.tir_optimista else None,
+                "tir_pesimista": float(evaluation.tir_pesimista) if evaluation.tir_pesimista else None,
+                "fecha_evaluacion": evaluation.fecha_evaluacion.isoformat() if evaluation.fecha_evaluacion else None,
+                "es_viable": (evaluation.van or 0) > 0,
+            }
+        else:
+            project_data["evaluacion"] = None
+
+        # Analisis de riesgo
+        if risk:
+            project_data["riesgo"] = {
+                "score_crediticio": risk.score_crediticio,
+                "nivel_riesgo": risk.nivel_riesgo.value if risk.nivel_riesgo else None,
+                "probabilidad_default": float(risk.probabilidad_default) if risk.probabilidad_default else None,
+                "probabilidad_exito": float(risk.probabilidad_exito) if risk.probabilidad_exito else None,
+                "score_capacidad_pago": risk.score_capacidad_pago,
+                "score_historial": risk.score_historial,
+                "score_garantias": risk.score_garantias,
+                "ratio_deuda_ingreso": float(risk.ratio_deuda_ingreso) if risk.ratio_deuda_ingreso else None,
+                "loan_to_value": float(risk.loan_to_value) if risk.loan_to_value else None,
+                "valor_garantias": float(risk.valor_garantias) if risk.valor_garantias else None,
+            }
+        else:
+            project_data["riesgo"] = None
+
+        # Flujos de caja
+        if cash_flows:
+            project_data["flujos_caja"] = [
+                {
+                    "periodo": cf.periodo_nro,
+                    "ingresos": float(cf.monto_ingreso or 0),
+                    "egresos": float(cf.monto_egreso or 0),
+                    "flujo_neto": float(cf.flujo_neto),
+                    "descripcion": cf.descripcion,
+                }
+                for cf in cash_flows
+            ]
+        else:
+            project_data["flujos_caja"] = []
+
+        # Indicadores sectoriales recomendados
+        sector_str = project.sector.value.lower() if hasattr(project.sector, 'value') else str(project.sector).lower()
+        project_data["indicadores_sectoriales"] = FeasibilityAnalyzer.get_indicators_for_project_type(sector_str)
+
+        result.append(project_data)
+
+    # Estadisticas generales
+    all_projects = db.query(Project).all()
+    stats = {
+        "total": len(all_projects),
+        "pendientes": len([p for p in all_projects if p.estado == ProjectStatus.EN_EVALUACION]),
+        "aprobados": len([p for p in all_projects if p.estado == ProjectStatus.APROBADO]),
+        "rechazados": len([p for p in all_projects if p.estado == ProjectStatus.RECHAZADO]),
+        "financiando": len([p for p in all_projects if p.estado == ProjectStatus.FINANCIANDO]),
+        "por_sector": {},
+    }
+
+    # Agrupar por sector
+    for p in all_projects:
+        sector_name = p.sector.value if hasattr(p.sector, 'value') else str(p.sector)
+        if sector_name not in stats["por_sector"]:
+            stats["por_sector"][sector_name] = 0
+        stats["por_sector"][sector_name] += 1
+
+    return {
+        "projects": result,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "stats": stats,
+        "all_indicators": FeasibilityAnalyzer.get_all_extended_indicators()
+    }
+
+
+# ===== ENDPOINTS INDICADORES DEL SECTOR =====
+
+@router.get("/{project_id}/indicators", response_model=SectorIndicatorsResponse)
+async def get_project_indicators(
+    project_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene los indicadores del sector para un proyecto.
+    """
+    # Verificar que el proyecto existe
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proyecto no encontrado"
+        )
+
+    # Buscar indicadores
+    indicators = db.query(SectorIndicators).filter(
+        SectorIndicators.proyecto_id == project_id
+    ).first()
+
+    if not indicators:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay indicadores registrados para este proyecto"
+        )
+
+    return indicators
+
+
+@router.post("/{project_id}/indicators", response_model=SectorIndicatorsResponse)
+async def create_or_update_indicators(
+    project_id: UUID,
+    indicators_data: SectorIndicatorsUpdate,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.ANALISTA, UserRole.CLIENTE])),
+    db: Session = Depends(get_db)
+):
+    """
+    Crea o actualiza los indicadores del sector para un proyecto.
+    """
+    # Verificar que el proyecto existe
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proyecto no encontrado"
+        )
+
+    # Buscar indicadores existentes
+    indicators = db.query(SectorIndicators).filter(
+        SectorIndicators.proyecto_id == project_id
+    ).first()
+
+    if indicators:
+        # Actualizar existentes
+        update_data = indicators_data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(indicators, key, value)
+        indicators.updated_at = datetime.utcnow()
+    else:
+        # Crear nuevos
+        indicators = SectorIndicators(
+            proyecto_id=project_id,
+            **indicators_data.model_dump(exclude_unset=True)
+        )
+        db.add(indicators)
+
+    db.commit()
+    db.refresh(indicators)
+
+    # Registrar en auditoria
+    audit = AuditLog(
+        usuario_id=current_user.id,
+        accion=AuditAction.PROJECT_MODIFIED,
+        recurso_tipo="SectorIndicators",
+        recurso_id=str(indicators.id),
+        datos_nuevos={"proyecto_id": str(project_id)}
+    )
+    db.add(audit)
+    db.commit()
+
+    return indicators
+
+
+@router.put("/{project_id}/indicators", response_model=SectorIndicatorsResponse)
+async def update_indicators(
+    project_id: UUID,
+    indicators_data: SectorIndicatorsUpdate,
+    current_user: User = Depends(require_role([UserRole.ADMIN, UserRole.ANALISTA, UserRole.CLIENTE])),
+    db: Session = Depends(get_db)
+):
+    """
+    Actualiza los indicadores del sector para un proyecto.
+    Solo actualiza los campos proporcionados.
+    """
+    # Verificar que el proyecto existe
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proyecto no encontrado"
+        )
+
+    # Buscar indicadores existentes
+    indicators = db.query(SectorIndicators).filter(
+        SectorIndicators.proyecto_id == project_id
+    ).first()
+
+    if not indicators:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay indicadores registrados para este proyecto. Use POST para crear."
+        )
+
+    # Actualizar solo campos proporcionados
+    update_data = indicators_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(indicators, key, value)
+    indicators.updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(indicators)
+
+    return indicators
+
+
+@router.delete("/{project_id}/indicators", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_indicators(
+    project_id: UUID,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: Session = Depends(get_db)
+):
+    """
+    Elimina los indicadores del sector para un proyecto.
+    Solo Admin puede eliminar.
+    """
+    indicators = db.query(SectorIndicators).filter(
+        SectorIndicators.proyecto_id == project_id
+    ).first()
+
+    if not indicators:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay indicadores registrados para este proyecto"
+        )
+
+    db.delete(indicators)
+    db.commit()
+
+    return None

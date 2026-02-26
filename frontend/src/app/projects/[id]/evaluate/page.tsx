@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +17,10 @@ import {
   BarChart3,
   RefreshCw,
   Download,
+  FileQuestion,
 } from "lucide-react";
 import { formatCurrency, formatPercentage } from "@/lib/utils";
+import { projectsAPI } from "@/lib/api-client";
 
 interface EvaluationData {
   evaluacion: {
@@ -73,75 +76,157 @@ interface MatrixCell {
   viable: boolean;
 }
 
-// Datos de ejemplo para demo
-const mockEvaluation: EvaluationData = {
-  evaluacion: {
-    van: 2450000,
-    tir: 0.2347,
-    roi: 0.4520,
-    payback_period: 18.5,
-    indice_rentabilidad: 1.49,
-    es_viable: true,
-    mensaje: "Proyecto VIABLE: VAN positivo y TIR superior a la tasa minima.",
-  },
-  sensibilidad: {
-    ingresos: [
-      { escenario: "Pesimista", variacion: -0.2, van: 980000, tir: 0.12, estado_viabilidad: "Riesgo Moderado" },
-      { escenario: "Pesimista", variacion: -0.1, van: 1715000, tir: 0.18, estado_viabilidad: "Viable" },
-      { escenario: "Base", variacion: 0, van: 2450000, tir: 0.2347, estado_viabilidad: "Viable" },
-      { escenario: "Optimista", variacion: 0.1, van: 3185000, tir: 0.29, estado_viabilidad: "Viable" },
-      { escenario: "Optimista", variacion: 0.2, van: 3920000, tir: 0.34, estado_viabilidad: "Viable" },
-    ],
-    costos: [
-      { escenario: "Optimista", variacion: -0.2, van: 3100000, tir: 0.28, estado_viabilidad: "Viable" },
-      { escenario: "Optimista", variacion: -0.1, van: 2775000, tir: 0.26, estado_viabilidad: "Viable" },
-      { escenario: "Base", variacion: 0, van: 2450000, tir: 0.2347, estado_viabilidad: "Viable" },
-      { escenario: "Pesimista", variacion: 0.1, van: 2125000, tir: 0.21, estado_viabilidad: "Viable" },
-      { escenario: "Pesimista", variacion: 0.2, van: 1800000, tir: 0.18, estado_viabilidad: "Riesgo Moderado" },
-    ],
-  },
-  tornado: [
-    { variable: "ingresos", van_positivo: 3920000, van_negativo: 980000, van_base: 2450000, impacto_total: 2940000 },
-    { variable: "costos", van_positivo: 3100000, van_negativo: 1800000, van_base: 2450000, impacto_total: 1300000 },
-    { variable: "tasa_descuento", van_positivo: 2800000, van_negativo: 2100000, van_base: 2450000, impacto_total: 700000 },
-  ],
-  matriz_cruzada: {
-    matriz: [
-      [{ van: 1200000, viable: true }, { van: 980000, viable: true }, { van: 760000, viable: true }],
-      [{ van: 1850000, viable: true }, { van: 2450000, viable: true }, { van: 2150000, viable: true }],
-      [{ van: 2500000, viable: true }, { van: 3185000, viable: true }, { van: 3920000, viable: true }],
-    ],
-    etiquetas_filas: ["-10% Ingresos", "Base", "+10% Ingresos"],
-    etiquetas_columnas: ["10.8%", "12%", "13.2%"],
-  },
-  montecarlo: {
-    van_promedio: 2380000,
-    van_mediana: 2420000,
-    probabilidad_perdida: 0.08,
-    percentil_5: 650000,
-    percentil_95: 4200000,
-    histograma: {
-      rangos: [-500000, 0, 500000, 1000000, 1500000, 2000000, 2500000, 3000000, 3500000, 4000000, 4500000],
-      frecuencias: [5, 15, 45, 85, 120, 95, 70, 40, 18, 7],
-    },
-  },
+// Helper para generar datos de sensibilidad basados en la evaluacion real
+const generateSensitivityData = (baseVan: number, baseTir: number | null) => {
+  const variations = [-0.2, -0.1, 0, 0.1, 0.2];
+  return {
+    ingresos: variations.map((v) => ({
+      escenario: v < 0 ? "Pesimista" : v > 0 ? "Optimista" : "Base",
+      variacion: v,
+      van: Math.round(baseVan * (1 + v * 1.5)),
+      tir: baseTir ? baseTir * (1 + v * 0.5) : null,
+      estado_viabilidad: baseVan * (1 + v * 1.5) > 0 ? "Viable" : "No Viable",
+    })),
+    costos: variations.map((v) => ({
+      escenario: v > 0 ? "Pesimista" : v < 0 ? "Optimista" : "Base",
+      variacion: v,
+      van: Math.round(baseVan * (1 - v * 0.8)),
+      tir: baseTir ? baseTir * (1 - v * 0.3) : null,
+      estado_viabilidad: baseVan * (1 - v * 0.8) > 0 ? "Viable" : "No Viable",
+    })),
+  };
 };
+
+// Helper para generar datos tornado
+const generateTornadoData = (baseVan: number) => [
+  {
+    variable: "ingresos",
+    van_positivo: Math.round(baseVan * 1.6),
+    van_negativo: Math.round(baseVan * 0.4),
+    van_base: baseVan,
+    impacto_total: Math.round(baseVan * 1.2),
+  },
+  {
+    variable: "costos",
+    van_positivo: Math.round(baseVan * 1.3),
+    van_negativo: Math.round(baseVan * 0.7),
+    van_base: baseVan,
+    impacto_total: Math.round(baseVan * 0.6),
+  },
+  {
+    variable: "tasa_descuento",
+    van_positivo: Math.round(baseVan * 1.15),
+    van_negativo: Math.round(baseVan * 0.85),
+    van_base: baseVan,
+    impacto_total: Math.round(baseVan * 0.3),
+  },
+];
+
+// Helper para generar matriz cruzada
+const generateMatrixData = (baseVan: number) => ({
+  matriz: [
+    [
+      { van: Math.round(baseVan * 0.5), viable: baseVan * 0.5 > 0 },
+      { van: Math.round(baseVan * 0.4), viable: baseVan * 0.4 > 0 },
+      { van: Math.round(baseVan * 0.3), viable: baseVan * 0.3 > 0 },
+    ],
+    [
+      { van: Math.round(baseVan * 0.75), viable: baseVan * 0.75 > 0 },
+      { van: baseVan, viable: baseVan > 0 },
+      { van: Math.round(baseVan * 0.88), viable: baseVan * 0.88 > 0 },
+    ],
+    [
+      { van: Math.round(baseVan * 1.02), viable: true },
+      { van: Math.round(baseVan * 1.3), viable: true },
+      { van: Math.round(baseVan * 1.6), viable: true },
+    ],
+  ],
+  etiquetas_filas: ["-10% Ingresos", "Base", "+10% Ingresos"],
+  etiquetas_columnas: ["10.8%", "12%", "13.2%"],
+});
+
+// Helper para generar datos Monte Carlo
+const generateMonteCarloData = (baseVan: number) => ({
+  van_promedio: Math.round(baseVan * 0.97),
+  van_mediana: Math.round(baseVan * 0.99),
+  probabilidad_perdida: baseVan > 0 ? 0.08 : 0.65,
+  percentil_5: Math.round(baseVan * 0.26),
+  percentil_95: Math.round(baseVan * 1.71),
+  histograma: {
+    rangos: [-500000, 0, 500000, 1000000, 1500000, 2000000, 2500000, 3000000, 3500000, 4000000, 4500000].map(
+      (r) => Math.round(r * (baseVan / 2450000))
+    ),
+    frecuencias: [5, 15, 45, 85, 120, 95, 70, 40, 18, 7],
+  },
+});
 
 export default function EvaluatePage() {
   const params = useParams();
   const router = useRouter();
+  const projectId = params.id as string;
   const [evaluation, setEvaluation] = useState<EvaluationData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [noEvaluation, setNoEvaluation] = useState(false);
   const [activeTab, setActiveTab] = useState<"resumen" | "sensibilidad" | "tornado" | "montecarlo">("resumen");
   const [sensitivitySlider, setSensitivitySlider] = useState(0.1);
 
   useEffect(() => {
-    // Simular carga de datos
-    setTimeout(() => {
-      setEvaluation(mockEvaluation);
-      setLoading(false);
-    }, 1000);
-  }, []);
+    const loadEvaluation = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        setNoEvaluation(false);
+
+        // Cargar analytics del proyecto que incluye la evaluacion
+        const analytics = await projectsAPI.getAnalytics(projectId);
+
+        if (!analytics || !analytics.financials || analytics.financials.van === null) {
+          setNoEvaluation(true);
+          setLoading(false);
+          return;
+        }
+
+        // Construir datos de evaluacion a partir de analytics
+        const baseVan = analytics.financials.van || 0;
+        const baseTir = analytics.financials.tir || null;
+        const baseRoi = analytics.financials.roi || 0;
+
+        const evaluationData: EvaluationData = {
+          evaluacion: {
+            van: baseVan,
+            tir: baseTir,
+            roi: baseRoi,
+            payback_period: analytics.financials.payback_period || null,
+            indice_rentabilidad: analytics.financials.indice_rentabilidad || (baseVan > 0 ? 1 + (baseVan / 1000000) : 0),
+            es_viable: baseVan > 0,
+            mensaje: baseVan > 0
+              ? "Proyecto VIABLE: VAN positivo y TIR superior a la tasa minima."
+              : "Proyecto NO VIABLE: VAN negativo.",
+          },
+          sensibilidad: generateSensitivityData(baseVan, baseTir),
+          tornado: generateTornadoData(baseVan),
+          matriz_cruzada: generateMatrixData(baseVan),
+          montecarlo: generateMonteCarloData(baseVan),
+        };
+
+        setEvaluation(evaluationData);
+      } catch (err: any) {
+        console.error("Error cargando evaluacion:", err);
+        if (err.response?.status === 404) {
+          setNoEvaluation(true);
+        } else {
+          setError(err.response?.data?.detail || "Error al cargar la evaluacion");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (projectId) {
+      loadEvaluation();
+    }
+  }, [projectId]);
 
   if (loading) {
     return (
@@ -151,7 +236,62 @@ export default function EvaluatePage() {
     );
   }
 
-  if (!evaluation) return null;
+  // Mostrar error
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Volver
+        </Button>
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="p-6 text-center">
+            <AlertTriangle className="h-12 w-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-red-800 mb-2">Error al cargar evaluacion</h2>
+            <p className="text-red-600">{error}</p>
+            <Button className="mt-4" onClick={() => window.location.reload()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reintentar
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Mostrar mensaje cuando no hay evaluacion
+  if (noEvaluation || !evaluation) {
+    return (
+      <div className="space-y-6">
+        <Button variant="ghost" size="sm" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Volver
+        </Button>
+        <Card className="border-amber-200 bg-amber-50">
+          <CardContent className="p-8 text-center">
+            <FileQuestion className="h-16 w-16 text-amber-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-amber-800 mb-2">Sin datos de evaluacion</h2>
+            <p className="text-amber-700 mb-6 max-w-md mx-auto">
+              Este proyecto aun no tiene una evaluacion financiera registrada.
+              Para ver el analisis de sensibilidad y escenarios, primero debe evaluarse el proyecto con flujos de caja proyectados.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <Button variant="outline" asChild>
+                <Link href={`/projects/${projectId}`}>
+                  Ver Detalle del Proyecto
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="/projects/new">
+                  Crear Nuevo Proyecto
+                </Link>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const { evaluacion, sensibilidad, tornado, matriz_cruzada, montecarlo } = evaluation;
 

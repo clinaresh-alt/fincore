@@ -56,42 +56,9 @@ export default function ProjectDetailPage() {
       setAnalytics(analyticsData);
     } catch (error) {
       console.error("Error loading project:", error);
-      // Mock data para demo
-      setProject({
-        id: projectId,
-        nombre: "Plaza Comercial Reforma",
-        descripcion:
-          "Desarrollo de centro comercial premium de 45,000 m2 en Av. Paseo de la Reforma. El proyecto incluye 120 locales comerciales, 3 anclas departamentales, food court con 25 restaurantes, cine multiplex de 12 salas, y estacionamiento subterraneo para 2,000 vehiculos. Ubicacion estrategica en una de las avenidas mas importantes de CDMX.",
-        sector: "Inmobiliario",
-        monto_solicitado: 15000000,
-        monto_financiado: 9000000,
-        plazo_meses: 36,
-        estado: "Financiando",
-        tasa_rendimiento_anual: 0.18,
-        created_at: "2024-01-15",
-      });
-      setAnalytics({
-        project_id: projectId,
-        nombre: "Plaza Comercial Reforma",
-        estado: "Financiando",
-        financials: {
-          van: 4500000,
-          tir: 0.22,
-          roi: 0.54,
-          risk_level: "AA",
-        },
-        cash_flow_series: [
-          { period: "2024", amount: -15000000 },
-          { period: "2025", amount: 3500000 },
-          { period: "2026", amount: 5200000 },
-          { period: "2027", amount: 6800000 },
-          { period: "2028", amount: 7500000 },
-        ],
-        monto_solicitado: 15000000,
-        monto_financiado: 9000000,
-        porcentaje_financiado: 60,
-        total_inversionistas: 42,
-      });
+      // Proyecto no encontrado - mostrar mensaje de error
+      setProject(null);
+      setAnalytics(null);
     } finally {
       setLoading(false);
     }

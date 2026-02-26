@@ -14,7 +14,10 @@ import {
   MoreVertical,
   UserCheck,
   UserX,
+  Settings,
+  Bot,
 } from "lucide-react";
+import Link from "next/link";
 import { formatCurrency } from "@/lib/utils";
 
 interface User {
@@ -54,11 +57,19 @@ export default function AdminPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Administracion</h1>
-        <p className="text-muted-foreground mt-1">
-          Panel de control del sistema
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Administracion</h1>
+          <p className="text-muted-foreground mt-1">
+            Panel de control del sistema
+          </p>
+        </div>
+        <Link href="/admin/settings">
+          <Button variant="outline">
+            <Settings className="mr-2 h-4 w-4" />
+            Configuracion del Sistema
+          </Button>
+        </Link>
       </div>
 
       {/* KPIs */}
@@ -227,6 +238,18 @@ export default function AdminPage() {
                 <span className="h-2 w-2 rounded-full bg-yellow-600"></span>
                 Configurar
               </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm flex items-center gap-2">
+                <Bot className="h-4 w-4" />
+                Inteligencia Artificial
+              </span>
+              <Link href="/admin/settings">
+                <span className="flex items-center gap-2 text-yellow-600 text-sm hover:underline cursor-pointer">
+                  <span className="h-2 w-2 rounded-full bg-yellow-600"></span>
+                  Configurar
+                </span>
+              </Link>
             </div>
           </CardContent>
         </Card>

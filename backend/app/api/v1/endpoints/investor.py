@@ -126,7 +126,7 @@ async def get_portfolio(
 @router.post("/invest", response_model=InvestmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_investment(
     investment_data: InvestmentCreate,
-    current_user: User = Depends(require_role([UserRole.INVERSIONISTA])),
+    current_user: User = Depends(require_role([UserRole.INVERSIONISTA, UserRole.ADMIN])),
     db: Session = Depends(get_db)
 ):
     """

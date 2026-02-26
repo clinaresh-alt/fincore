@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # JWT Configuration
     JWT_SECRET_KEY: str = secrets.token_urlsafe(32)
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 horas de trabajo
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # MFA Configuration
@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # Tax API Integration
     TAX_API_URL: str = ""
     TAX_API_KEY: str = ""
+
+    # AI Analysis (Claude API)
+    ANTHROPIC_API_KEY: str = ""
 
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]

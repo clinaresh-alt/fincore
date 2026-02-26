@@ -47,6 +47,10 @@ python-dotenv==1.0.1
 httpx==0.26.0
 tenacity==8.2.3
 
+# AI Analysis
+anthropic==0.18.1
+PyPDF2==3.0.1
+
 # Monitoring & Observability
 prometheus-client==0.20.0
 opentelemetry-api==1.22.0

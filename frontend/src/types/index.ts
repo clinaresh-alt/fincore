@@ -33,9 +33,15 @@ export interface Project {
   sector: string;
   monto_solicitado: number;
   monto_financiado: number;
+  monto_minimo_inversion?: number;
   plazo_meses: number;
+  fecha_inicio_estimada?: string;
+  fecha_fin_estimada?: string;
   estado: ProjectStatus;
   tasa_rendimiento_anual?: number;
+  rendimiento_proyectado?: number;
+  empresa_solicitante?: string;
+  tiene_documentacion_completa?: boolean;
   created_at: string;
 }
 

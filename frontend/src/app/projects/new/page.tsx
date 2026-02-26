@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { projectsAPI } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   Info,
+  Upload,
+  FileText,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { formatCurrency, formatPercentage } from "@/lib/utils";
 
@@ -35,6 +40,7 @@ interface FinancialConfig {
   tasa_descuento: number;
   plazo_meses: number;
   tasa_rendimiento_esperado: number;
+  tipo_periodo: "mensual" | "anual";
 }
 
 interface CashFlowRow {
@@ -67,6 +73,74 @@ const sectors = [
   "Otro",
 ];
 
+// Indicadores extendidos por tipo de proyecto
+const indicatorsByProjectType: Record<string, string[]> = {
+  Inmobiliario: ["cap_rate", "precio_m2", "yield_bruto", "yield_neto", "loan_to_value", "debt_service_coverage"],
+  Tecnologia: ["ltv_cac_ratio", "burn_rate", "runway_meses", "mrr", "arr", "churn_rate", "nps"],
+  Energia: ["lcoe", "factor_capacidad", "ingresos_kwh", "costo_instalacion_kw", "vida_util_anos"],
+  Agrotech: ["rendimiento_hectarea", "margen_bruto", "costo_produccion_ton", "punto_equilibrio"],
+  Fintech: ["take_rate", "volumen_procesado", "costo_adquisicion", "lifetime_value", "default_rate"],
+  Industrial: ["margen_operativo", "utilizacion_capacidad", "costo_unitario", "punto_equilibrio_unidades"],
+  Comercio: ["ventas_m2", "margen_bruto", "rotacion_inventario", "ticket_promedio", "conversion_rate"],
+  Infraestructura: ["eirr", "firr", "beneficio_costo_ratio", "trafico_proyectado", "tarifa_promedio"],
+  Servicios: ["margen_operativo", "ticket_promedio", "rotacion_clientes", "costo_adquisicion"],
+  Otro: [],
+};
+
+// Descripciones de indicadores
+const indicatorDescriptions: Record<string, { name: string; description: string }> = {
+  // Inmobiliario
+  cap_rate: { name: "Cap Rate", description: "Tasa de capitalizacion" },
+  precio_m2: { name: "Precio/m2", description: "Precio por metro cuadrado" },
+  yield_bruto: { name: "Yield Bruto", description: "Rendimiento bruto anual" },
+  yield_neto: { name: "Yield Neto", description: "Rendimiento neto anual" },
+  loan_to_value: { name: "LTV", description: "Relacion prestamo/valor" },
+  debt_service_coverage: { name: "DSCR", description: "Cobertura servicio de deuda" },
+  // Tecnologia
+  ltv_cac_ratio: { name: "LTV/CAC", description: "Ratio valor vida cliente / costo adquisicion" },
+  burn_rate: { name: "Burn Rate", description: "Tasa de quema mensual" },
+  runway_meses: { name: "Runway", description: "Meses de operacion con capital actual" },
+  mrr: { name: "MRR", description: "Ingresos recurrentes mensuales" },
+  arr: { name: "ARR", description: "Ingresos recurrentes anuales" },
+  churn_rate: { name: "Churn", description: "Tasa de cancelacion de clientes" },
+  nps: { name: "NPS", description: "Net Promoter Score" },
+  // Energia
+  lcoe: { name: "LCOE", description: "Costo nivelado de energia" },
+  factor_capacidad: { name: "Factor Cap.", description: "Factor de capacidad de planta" },
+  ingresos_kwh: { name: "$/kWh", description: "Ingresos por kilovatio-hora" },
+  costo_instalacion_kw: { name: "$/kW inst.", description: "Costo de instalacion por kW" },
+  vida_util_anos: { name: "Vida Util", description: "Anos de vida util del proyecto" },
+  // Agrotech
+  rendimiento_hectarea: { name: "Rend./Ha", description: "Rendimiento por hectarea" },
+  margen_bruto: { name: "Margen Bruto", description: "Margen bruto operativo" },
+  costo_produccion_ton: { name: "$/Ton", description: "Costo produccion por tonelada" },
+  punto_equilibrio: { name: "Break-Even", description: "Punto de equilibrio" },
+  // Fintech
+  take_rate: { name: "Take Rate", description: "Porcentaje de comision por transaccion" },
+  volumen_procesado: { name: "TPV", description: "Volumen total procesado" },
+  costo_adquisicion: { name: "CAC", description: "Costo adquisicion de cliente" },
+  lifetime_value: { name: "LTV", description: "Valor de vida del cliente" },
+  default_rate: { name: "Default Rate", description: "Tasa de incumplimiento" },
+  // Industrial
+  margen_operativo: { name: "Margen Op.", description: "Margen operativo" },
+  utilizacion_capacidad: { name: "Utilizacion", description: "Porcentaje uso capacidad instalada" },
+  costo_unitario: { name: "Costo Unit.", description: "Costo por unidad producida" },
+  punto_equilibrio_unidades: { name: "BE Units", description: "Unidades para punto equilibrio" },
+  // Comercio
+  ventas_m2: { name: "Ventas/m2", description: "Ventas por metro cuadrado" },
+  rotacion_inventario: { name: "Rotacion Inv.", description: "Veces que rota inventario al ano" },
+  ticket_promedio: { name: "Ticket Prom.", description: "Valor promedio por transaccion" },
+  conversion_rate: { name: "Conv. Rate", description: "Tasa de conversion de visitas" },
+  // Infraestructura
+  eirr: { name: "EIRR", description: "Tasa retorno economica" },
+  firr: { name: "FIRR", description: "Tasa retorno financiera" },
+  beneficio_costo_ratio: { name: "B/C Ratio", description: "Relacion beneficio/costo" },
+  trafico_proyectado: { name: "Trafico", description: "Usuarios/vehiculos proyectados" },
+  tarifa_promedio: { name: "Tarifa Prom.", description: "Tarifa promedio por uso" },
+  // Servicios
+  rotacion_clientes: { name: "Rotacion", description: "Tasa de rotacion de clientes" },
+};
+
 const steps = [
   { id: 1, title: "Datos Basicos", icon: Building2 },
   { id: 2, title: "Configuracion Financiera", icon: DollarSign },
@@ -94,6 +168,7 @@ export default function NewProjectPage() {
     tasa_descuento: 0.12,
     plazo_meses: 24,
     tasa_rendimiento_esperado: 0.15,
+    tipo_periodo: "mensual",
   });
 
   // Step 3: Flujos de caja
@@ -110,6 +185,75 @@ export default function NewProjectPage() {
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
   const [sensitivityVar, setSensitivityVar] = useState(0.1);
 
+  // PDF Upload y analisis IA
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [isAnalyzingPdf, setIsAnalyzingPdf] = useState(false);
+  const [pdfAnalysisResult, setPdfAnalysisResult] = useState<any>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [sectorIndicators, setSectorIndicators] = useState<string[]>([]);
+
+  // Estado para valores de indicadores editables
+  const [indicatorValues, setIndicatorValues] = useState<Record<string, number | string>>({});
+
+  // Funcion para analizar PDF con IA
+  const handlePdfUpload = async (file: File) => {
+    setPdfFile(file);
+    setPdfError(null);
+    setIsAnalyzingPdf(true);
+
+    try {
+      const result = await projectsAPI.analyzeFeasibility(file);
+      setPdfAnalysisResult(result);
+
+      // Auto-llenar datos extraidos
+      if (result.extracted_data) {
+        const { basic, financial_config, cash_flows } = result.extracted_data;
+
+        // Datos basicos
+        setBasicData({
+          nombre: basic.nombre || "",
+          descripcion: basic.descripcion || "",
+          sector: basic.sector || "Otro",
+          ubicacion: basic.ubicacion || "",
+          empresa_solicitante: basic.empresa_solicitante || "",
+        });
+
+        // Configuracion financiera
+        setFinancialConfig({
+          inversion_inicial: financial_config.inversion_inicial || 1000000,
+          tasa_descuento: financial_config.tasa_descuento || 0.12,
+          plazo_meses: financial_config.plazo_meses || 24,
+          tasa_rendimiento_esperado: financial_config.tasa_rendimiento_esperado || 0.15,
+          tipo_periodo: financial_config.tipo_periodo || "mensual",
+        });
+
+        // Flujos de caja
+        if (cash_flows && cash_flows.length > 0) {
+          setCashFlows(
+            cash_flows.map((cf: any) => ({
+              periodo: cf.periodo,
+              ingresos: cf.ingresos,
+              costos: cf.costos,
+              descripcion: cf.descripcion || `Periodo ${cf.periodo}`,
+            }))
+          );
+        }
+
+        // Indicadores del sector
+        setSectorIndicators(result.recommended_indicators || []);
+      }
+    } catch (error: any) {
+      console.error("Error analizando PDF:", error);
+      setPdfError(error.response?.data?.detail || "Error al analizar el documento");
+    } finally {
+      setIsAnalyzingPdf(false);
+    }
+  };
+
+  // Helper para etiqueta de periodo
+  const getPeriodoLabel = (num: number) =>
+    financialConfig.tipo_periodo === "mensual" ? `Mes ${num}` : `Ano ${num}`;
+
   // Handlers
   const addCashFlowRow = () => {
     const newPeriod = cashFlows.length + 1;
@@ -120,7 +264,7 @@ export default function NewProjectPage() {
         periodo: newPeriod,
         ingresos: lastRow?.ingresos || 100000,
         costos: lastRow?.costos || 30000,
-        descripcion: `Mes ${newPeriod}`,
+        descripcion: getPeriodoLabel(newPeriod),
       },
     ]);
   };
@@ -129,7 +273,7 @@ export default function NewProjectPage() {
     if (cashFlows.length > 1) {
       const newFlows = cashFlows.filter((_, i) => i !== index);
       setCashFlows(
-        newFlows.map((f, i) => ({ ...f, periodo: i + 1, descripcion: `Mes ${i + 1}` }))
+        newFlows.map((f, i) => ({ ...f, periodo: i + 1, descripcion: getPeriodoLabel(i + 1) }))
       );
     }
   };
@@ -227,10 +371,63 @@ export default function NewProjectPage() {
     setCurrentStep(Math.max(currentStep - 1, 1));
   };
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const handleSubmit = async () => {
-    // TODO: Enviar al backend
-    alert("Proyecto guardado exitosamente");
-    router.push("/projects");
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      // Crear proyecto
+      const projectResponse = await projectsAPI.create({
+        nombre: basicData.nombre,
+        descripcion: basicData.descripcion,
+        sector: basicData.sector,
+        monto_solicitado: financialConfig.inversion_inicial,
+        plazo_meses: financialConfig.plazo_meses,
+        tasa_rendimiento_anual: financialConfig.tasa_rendimiento_esperado,
+      });
+
+      // Si hay evaluacion, enviar los flujos de caja
+      if (evaluation && projectResponse.id) {
+        await projectsAPI.evaluate({
+          proyecto_id: projectResponse.id,
+          inversion_inicial: financialConfig.inversion_inicial,
+          tasa_descuento: financialConfig.tasa_descuento,
+          flujos_caja: cashFlows.map((cf) => ({
+            periodo_nro: cf.periodo,
+            monto_ingreso: cf.ingresos,
+            monto_egreso: cf.costos,
+          })),
+        });
+      }
+
+      // Guardar indicadores del sector si hay valores
+      const indicatorsToSave = Object.entries(indicatorValues).reduce((acc, [key, value]) => {
+        if (value !== "" && value !== null && value !== undefined) {
+          acc[key] = typeof value === 'string' ? parseFloat(value) : value;
+        }
+        return acc;
+      }, {} as Record<string, number>);
+
+      if (Object.keys(indicatorsToSave).length > 0 && projectResponse.id) {
+        try {
+          await projectsAPI.saveIndicators(projectResponse.id, indicatorsToSave);
+        } catch (indicatorError) {
+          console.warn("Error guardando indicadores:", indicatorError);
+          // No fallar el guardado completo si fallan los indicadores
+        }
+      }
+
+      alert("Proyecto guardado exitosamente");
+      router.push("/projects");
+    } catch (error: any) {
+      console.error("Error guardando proyecto:", error);
+      setSaveError(error.response?.data?.detail || "Error al guardar el proyecto");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -297,6 +494,94 @@ export default function NewProjectPage() {
                 <CardDescription>
                   Informacion general sobre el proyecto de inversion
                 </CardDescription>
+              </div>
+
+              {/* PDF Upload con IA */}
+              <div className="p-4 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 hover:border-primary hover:bg-slate-100 transition-colors">
+                <div className="flex flex-col items-center justify-center py-4">
+                  {isAnalyzingPdf ? (
+                    <>
+                      <Loader2 className="h-10 w-10 text-primary animate-spin mb-3" />
+                      <p className="text-sm font-medium text-slate-700">Analizando documento con IA...</p>
+                      <p className="text-xs text-muted-foreground mt-1">Extrayendo datos del estudio de factibilidad</p>
+                    </>
+                  ) : pdfAnalysisResult ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Sparkles className="h-6 w-6 text-green-600" />
+                        <CheckCircle2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <p className="text-sm font-medium text-green-700">Documento analizado exitosamente</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {pdfFile?.name} - Confianza: {Math.round((pdfAnalysisResult.extraction_confidence || 0.8) * 100)}%
+                      </p>
+                      {pdfAnalysisResult.extraction_notes && (
+                        <p className="text-xs text-amber-600 mt-2 text-center max-w-md">
+                          {pdfAnalysisResult.extraction_notes}
+                        </p>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        onClick={() => {
+                          setPdfFile(null);
+                          setPdfAnalysisResult(null);
+                        }}
+                      >
+                        Cargar otro documento
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Upload className="h-8 w-8 text-slate-400" />
+                        <Sparkles className="h-6 w-6 text-primary" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-700">Cargar Estudio de Factibilidad (PDF)</p>
+                      <p className="text-xs text-muted-foreground mt-1 text-center max-w-sm">
+                        Sube tu documento PDF y la IA extraera automaticamente los datos financieros del proyecto
+                      </p>
+                      <label className="mt-4 cursor-pointer">
+                        <input
+                          type="file"
+                          accept=".pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              handlePdfUpload(file);
+                            }
+                          }}
+                        />
+                        <span className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-medium rounded-md hover:bg-primary/90 transition-colors">
+                          <FileText className="h-4 w-4" />
+                          Seleccionar PDF
+                        </span>
+                      </label>
+                    </>
+                  )}
+                </div>
+
+                {/* Error de PDF */}
+                {pdfError && (
+                  <div className="mt-3 p-3 rounded-md bg-red-50 border border-red-200">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                      <p className="text-sm text-red-700">{pdfError}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Separador */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-muted-foreground">O completa manualmente</span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -444,8 +729,51 @@ export default function NewProjectPage() {
                       }
                       className="w-24"
                     />
-                    <span className="text-sm text-muted-foreground">meses</span>
+                    <span className="text-sm text-muted-foreground">
+                      {financialConfig.tipo_periodo === "mensual" ? "meses" : "anos"}
+                    </span>
                   </div>
+                </div>
+
+                <div className="p-4 rounded-lg border bg-slate-50">
+                  <label className="text-sm font-medium">Tipo de Periodo</label>
+                  <div className="flex items-center gap-4 mt-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="tipo_periodo"
+                        value="mensual"
+                        checked={financialConfig.tipo_periodo === "mensual"}
+                        onChange={() =>
+                          setFinancialConfig({
+                            ...financialConfig,
+                            tipo_periodo: "mensual",
+                          })
+                        }
+                        className="w-4 h-4 text-primary"
+                      />
+                      <span className="text-sm">Mensual</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="tipo_periodo"
+                        value="anual"
+                        checked={financialConfig.tipo_periodo === "anual"}
+                        onChange={() =>
+                          setFinancialConfig({
+                            ...financialConfig,
+                            tipo_periodo: "anual",
+                          })
+                        }
+                        className="w-4 h-4 text-primary"
+                      />
+                      <span className="text-sm">Anual</span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Define si los flujos de caja son por mes o por ano
+                  </p>
                 </div>
 
                 <div className="p-4 rounded-lg border bg-slate-50">
@@ -521,7 +849,7 @@ export default function NewProjectPage() {
                     {cashFlows.map((cf, index) => (
                       <tr key={index} className="border-t">
                         <td className="px-4 py-2">
-                          <span className="text-sm font-medium">Mes {cf.periodo}</span>
+                          <span className="text-sm font-medium">{getPeriodoLabel(cf.periodo)}</span>
                         </td>
                         <td className="px-4 py-2">
                           <Input
@@ -664,7 +992,9 @@ export default function NewProjectPage() {
                     <div className="p-4 rounded-lg border bg-white">
                       <p className="text-xs text-muted-foreground">Payback</p>
                       <p className="text-xl font-bold text-amber-600">
-                        {evaluation.payback !== null ? `${evaluation.payback} meses` : "N/A"}
+                        {evaluation.payback !== null
+                          ? `${evaluation.payback} ${financialConfig.tipo_periodo === "mensual" ? "meses" : "anos"}`
+                          : "N/A"}
                       </p>
                     </div>
                   </div>
@@ -732,6 +1062,58 @@ export default function NewProjectPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Indicadores Extendidos por Sector - Editables */}
+                  {indicatorsByProjectType[basicData.sector]?.length > 0 && (
+                    <div className="p-4 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <div className="flex items-center gap-2 mb-4">
+                        <Sparkles className="h-5 w-5 text-indigo-600" />
+                        <h4 className="text-sm font-medium text-indigo-900">
+                          Indicadores Especificos - Sector {basicData.sector}
+                        </h4>
+                      </div>
+                      <p className="text-xs text-muted-foreground mb-4">
+                        Ingrese las metricas relevantes para evaluar proyectos de tipo {basicData.sector.toLowerCase()}
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {indicatorsByProjectType[basicData.sector].map((indicatorKey) => {
+                          const indicator = indicatorDescriptions[indicatorKey];
+                          if (!indicator) return null;
+                          const isPercentage = indicatorKey.includes('rate') || indicatorKey.includes('ratio') || indicatorKey.includes('yield') || indicatorKey.includes('margen') || indicatorKey.includes('conversion') || indicatorKey.includes('utilizacion') || indicatorKey.includes('factor') || indicatorKey === 'ltv_cac_ratio';
+                          const isInteger = indicatorKey.includes('meses') || indicatorKey.includes('anos') || indicatorKey.includes('unidades') || indicatorKey === 'nps' || indicatorKey === 'trafico_proyectado';
+                          return (
+                            <div
+                              key={indicatorKey}
+                              className="p-3 rounded-lg bg-white border border-indigo-100"
+                            >
+                              <label className="text-xs font-medium text-indigo-700">{indicator.name}</label>
+                              <p className="text-[10px] text-muted-foreground mt-0.5 mb-2">
+                                {indicator.description}
+                              </p>
+                              <div className="flex items-center gap-1">
+                                <Input
+                                  type="number"
+                                  step={isPercentage ? "0.01" : isInteger ? "1" : "0.01"}
+                                  placeholder={isPercentage ? "0.00" : "0"}
+                                  value={indicatorValues[indicatorKey] ?? (pdfAnalysisResult?.extracted_data?.additional_data?.[indicatorKey] || "")}
+                                  onChange={(e) => setIndicatorValues({
+                                    ...indicatorValues,
+                                    [indicatorKey]: e.target.value === "" ? "" : parseFloat(e.target.value)
+                                  })}
+                                  className="h-8 text-sm"
+                                />
+                                {isPercentage && <span className="text-xs text-muted-foreground">%</span>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-blue-600 mt-3 flex items-center gap-1">
+                        <Info className="h-3 w-3" />
+                        Estos indicadores se guardaran junto con el proyecto
+                      </p>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
@@ -743,9 +1125,19 @@ export default function NewProjectPage() {
         </CardContent>
       </Card>
 
+      {/* Error message */}
+      {saveError && (
+        <div className="p-4 rounded-lg bg-red-50 border border-red-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-red-600" />
+            <p className="text-sm text-red-700">{saveError}</p>
+          </div>
+        </div>
+      )}
+
       {/* Navigation */}
       <div className="flex justify-between">
-        <Button variant="outline" onClick={handleBack} disabled={currentStep === 1}>
+        <Button variant="outline" onClick={handleBack} disabled={currentStep === 1 || isSaving}>
           <ArrowLeft className="h-4 w-4 mr-2" />
           Anterior
         </Button>
@@ -756,9 +1148,18 @@ export default function NewProjectPage() {
               <ArrowRight className="h-4 w-4 ml-2" />
             </Button>
           ) : (
-            <Button onClick={handleSubmit} disabled={!evaluation?.es_viable}>
-              <Check className="h-4 w-4 mr-2" />
-              Guardar Proyecto
+            <Button onClick={handleSubmit} disabled={!evaluation?.es_viable || isSaving}>
+              {isSaving ? (
+                <>
+                  <div className="h-4 w-4 mr-2 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Guardar Proyecto
+                </>
+              )}
             </Button>
           )}
         </div>

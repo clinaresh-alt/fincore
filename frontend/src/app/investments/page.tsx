@@ -34,48 +34,11 @@ export default function InvestmentsPage() {
   const loadInvestments = async () => {
     try {
       const data = await investorAPI.listInvestments();
-      setInvestments(data);
+      setInvestments(data || []);
     } catch (error) {
       console.error("Error loading investments:", error);
-      // Mock data
-      setInvestments([
-        {
-          id: "1",
-          proyecto_id: "p1",
-          proyecto_nombre: "Plaza Comercial Reforma",
-          monto_invertido: 100000,
-          monto_rendimiento_acumulado: 15000,
-          monto_total_recibido: 5000,
-          porcentaje_participacion: 0.0067,
-          estado: "En Rendimiento",
-          fecha_inversion: "2024-01-20",
-          fecha_vencimiento: "2027-01-20",
-        },
-        {
-          id: "2",
-          proyecto_id: "p2",
-          proyecto_nombre: "Fintech Pagos Digitales",
-          monto_invertido: 50000,
-          monto_rendimiento_acumulado: 8500,
-          monto_total_recibido: 3000,
-          porcentaje_participacion: 0.01,
-          estado: "Activa",
-          fecha_inversion: "2024-02-05",
-          fecha_vencimiento: "2026-02-05",
-        },
-        {
-          id: "3",
-          proyecto_id: "p3",
-          proyecto_nombre: "Parque Solar Sonora",
-          monto_invertido: 200000,
-          monto_rendimiento_acumulado: 42000,
-          monto_total_recibido: 242000,
-          porcentaje_participacion: 0.008,
-          estado: "Liquidada",
-          fecha_inversion: "2023-06-15",
-          fecha_vencimiento: "2024-06-15",
-        },
-      ]);
+      // Sin datos - mostrar estado vacío
+      setInvestments([]);
     } finally {
       setLoading(false);
     }

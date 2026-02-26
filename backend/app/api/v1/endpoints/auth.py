@@ -58,6 +58,31 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Dependency para obtener usuario actual de forma opcional (no lanza error si no hay token)."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.replace("Bearer ", "")
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "access":
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        return None
+
+    return user
+
+
 def require_role(allowed_roles: list):
     """Dependency factory para verificar roles."""
     def role_checker(current_user: User = Depends(get_current_user)):

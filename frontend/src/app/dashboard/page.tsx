@@ -62,34 +62,22 @@ export default function DashboardPage() {
   // Normalizar datos del portfolio (API devuelve strings en algunos campos)
   const normalizePortfolio = (p: Portfolio | null): Portfolio => {
     if (!p) {
-      // Mock data para demo si no hay portfolio
+      // Sin datos de portfolio - mostrar valores vacios
       return {
         kpis: {
-          total_invertido: 500000,
-          rendimiento_total: 75000,
-          rendimiento_porcentual: 0.15,
-          tir_cartera: 0.12,
-          moic: 1.15,
-          proyectos_activos: 3,
-          proyectos_completados: 2,
+          total_invertido: 0,
+          rendimiento_total: 0,
+          rendimiento_porcentual: 0,
+          tir_cartera: null,
+          moic: 0,
+          proyectos_activos: 0,
+          proyectos_completados: 0,
           proyectos_en_default: 0,
         },
-        distribucion_sectores: [
-          { sector: "Inmobiliario", monto: 200000, porcentaje: 0.4, cantidad_proyectos: 2 },
-          { sector: "Tecnologia", monto: 150000, porcentaje: 0.3, cantidad_proyectos: 1 },
-          { sector: "Energia", monto: 100000, porcentaje: 0.2, cantidad_proyectos: 1 },
-          { sector: "Agrotech", monto: 50000, porcentaje: 0.1, cantidad_proyectos: 1 },
-        ],
+        distribucion_sectores: [],
         inversiones: [],
         proximos_pagos: [],
-        rendimiento_historico: [
-          { mes: "Ene", rendimiento: 5000 },
-          { mes: "Feb", rendimiento: 7500 },
-          { mes: "Mar", rendimiento: 6200 },
-          { mes: "Abr", rendimiento: 8100 },
-          { mes: "May", rendimiento: 9500 },
-          { mes: "Jun", rendimiento: 12000 },
-        ],
+        rendimiento_historico: [],
       };
     }
     // Convertir strings a numeros en KPIs
