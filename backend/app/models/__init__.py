@@ -15,6 +15,11 @@ from app.models.ledger import ImmutableLedger, LedgerSnapshot, LedgerEntryType
 from app.models.system_config import SystemConfig, ConfigCategory
 from app.models.sector_metrics import SectorMetrics, SECTOR_INPUT_FIELDS, SECTOR_CALCULATED_INDICATORS
 from app.models.company import Company, CompanyDocument, CompanyType, CompanyStatus, CompanyDocumentType
+from app.models.blockchain import (
+    BlockchainNetwork, TokenType, TransactionStatus, TransactionType,
+    UserWallet, SmartContract, ProjectToken, TokenHolding,
+    BlockchainTransaction, DividendDistribution, KYCBlockchainRecord
+)
 
 __all__ = [
     # Core
@@ -50,4 +55,16 @@ __all__ = [
     "SectorMetrics",
     "SECTOR_INPUT_FIELDS",
     "SECTOR_CALCULATED_INDICATORS",
+    # Blockchain
+    "BlockchainNetwork",
+    "TokenType",
+    "TransactionStatus",
+    "TransactionType",
+    "UserWallet",
+    "SmartContract",
+    "ProjectToken",
+    "TokenHolding",
+    "BlockchainTransaction",
+    "DividendDistribution",
+    "KYCBlockchainRecord",
 ]

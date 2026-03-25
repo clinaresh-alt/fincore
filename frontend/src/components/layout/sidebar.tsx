@@ -13,6 +13,8 @@ import {
   Shield,
   Building2,
   Users,
+  Coins,
+  ShieldCheck,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -53,6 +55,18 @@ const navigation = [
     href: "/documents",
     icon: FileText,
     roles: ["Cliente", "Inversionista", "Admin"],
+  },
+  {
+    name: "Blockchain",
+    href: "/blockchain",
+    icon: Coins,
+    roles: ["Inversionista", "Admin"],
+  },
+  {
+    name: "Auditoria SC",
+    href: "/audit",
+    icon: ShieldCheck,
+    roles: ["Admin"],
   },
   {
     name: "Administracion",
@@ -120,25 +134,26 @@ export function Sidebar() {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="space-y-2">
           <Button
             variant="ghost"
             size="sm"
-            className="flex-1 text-slate-300 hover:text-white hover:bg-slate-800"
+            className="w-full justify-start text-slate-300 hover:text-white hover:bg-slate-800"
             asChild
           >
             <Link href="/settings">
               <Settings className="h-4 w-4 mr-2" />
-              Config
+              Configuracion
             </Link>
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="text-slate-300 hover:text-white hover:bg-slate-800"
+            className="w-full justify-start text-red-400 hover:text-red-300 hover:bg-red-900/20"
             onClick={() => logout()}
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4 mr-2" />
+            Cerrar Sesion
           </Button>
         </div>
       </div>

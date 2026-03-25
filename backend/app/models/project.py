@@ -111,6 +111,9 @@ class Project(Base):
     inversiones = relationship("Investment", back_populates="project")
     empresa = relationship("Company", back_populates="proyectos")
 
+    # Blockchain - Token de tokenizacion del proyecto
+    token_info = relationship("ProjectToken", back_populates="project", uselist=False)
+
     __table_args__ = (
         Index("idx_proyecto_estado", "estado"),
         Index("idx_proyecto_sector", "sector"),

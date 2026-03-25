@@ -39,6 +39,7 @@ import {
   Trash2,
   Loader2,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -173,20 +174,19 @@ export default function ProjectsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Proyectos</h1>
-          <p className="text-muted-foreground mt-1">
-            Explora oportunidades de inversion disponibles
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/projects/new">
-            <Plus className="h-4 w-4 mr-2" />
-            Nuevo Proyecto
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Proyectos"
+        description="Explora oportunidades de inversion disponibles"
+        backHref="/dashboard"
+        actions={
+          <Button asChild>
+            <Link href="/projects/new">
+              <Plus className="h-4 w-4 mr-2" />
+              Nuevo Proyecto
+            </Link>
+          </Button>
+        }
+      />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">

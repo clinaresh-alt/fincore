@@ -77,6 +77,9 @@ class User(Base):
     audit_logs = relationship("AuditLog", back_populates="user")
     companies = relationship("Company", back_populates="user", foreign_keys="Company.user_id")
 
+    # Blockchain - Wallets del usuario
+    wallets = relationship("UserWallet", back_populates="user", cascade="all, delete-orphan")
+
     def __repr__(self):
         return f"<User {self.email}>"
 

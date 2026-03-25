@@ -43,6 +43,7 @@ import {
   XCircle,
   AlertCircle,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 
 interface Company {
   id: string;
@@ -177,20 +178,19 @@ export default function CompaniesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Empresas</h1>
-          <p className="text-muted-foreground mt-1">
-            Gestiona las empresas solicitantes de proyectos
-          </p>
-        </div>
-        <Button asChild>
-          <Link href="/companies/new">
-            <Plus className="h-4 w-4 mr-2" />
-            Nueva Empresa
-          </Link>
-        </Button>
-      </div>
+      <PageHeader
+        title="Empresas"
+        description="Gestiona las empresas solicitantes de proyectos"
+        backHref="/dashboard"
+        actions={
+          <Button asChild>
+            <Link href="/companies/new">
+              <Plus className="h-4 w-4 mr-2" />
+              Nueva Empresa
+            </Link>
+          </Button>
+        }
+      />
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">

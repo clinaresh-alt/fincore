@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Settings,
   User,
   Shield,
   Bell,
@@ -15,6 +14,7 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 
 export default function SettingsPage() {
   const { user } = useAuthStore();
@@ -23,12 +23,11 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6 max-w-4xl">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Configuracion</h1>
-        <p className="text-muted-foreground mt-1">
-          Administra tu cuenta y preferencias
-        </p>
-      </div>
+      <PageHeader
+        title="Configuracion"
+        description="Administra tu cuenta y preferencias"
+        backHref="/dashboard"
+      />
 
       {/* Profile Section */}
       <Card>

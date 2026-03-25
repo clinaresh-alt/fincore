@@ -64,9 +64,38 @@ class Settings(BaseSettings):
     # Audit Trail
     ENABLE_AUDIT_LOG: bool = True
 
+    # ==================== BLOCKCHAIN ====================
+    BLOCKCHAIN_DEFAULT_NETWORK: str = "polygon"
+    BLOCKCHAIN_OPERATOR_KEY: str = ""
+
+    # RPC URLs
+    POLYGON_RPC_URL: str = "https://polygon-rpc.com"
+    POLYGON_MUMBAI_RPC_URL: str = "https://rpc-mumbai.maticvigil.com"
+    ETHEREUM_RPC_URL: str = "https://eth.llamarpc.com"
+    ETHEREUM_SEPOLIA_RPC_URL: str = "https://rpc.sepolia.org"
+    ARBITRUM_RPC_URL: str = "https://arb1.arbitrum.io/rpc"
+    BASE_RPC_URL: str = "https://mainnet.base.org"
+
+    # Block Explorer API Keys
+    POLYGONSCAN_API_KEY: str = ""
+    ETHERSCAN_API_KEY: str = ""
+    ARBISCAN_API_KEY: str = ""
+    BASESCAN_API_KEY: str = ""
+
+    # Contract Addresses (configurar despues del deploy)
+    FINCORE_INVESTMENT_CONTRACT: str = ""
+    FINCORE_KYC_CONTRACT: str = ""
+    FINCORE_DIVIDENDS_CONTRACT: str = ""
+    USDC_TOKEN_ADDRESS: str = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+
+    # Gas Configuration
+    GAS_PRICE_MULTIPLIER: float = 1.1
+    MAX_GAS_PRICE_GWEI: int = 500
+
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Ignorar variables extra en .env
 
 
 settings = Settings()

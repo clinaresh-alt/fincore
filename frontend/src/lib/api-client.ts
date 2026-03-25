@@ -335,4 +335,249 @@ export const investorAPI = {
   },
 };
 
+// === BLOCKCHAIN API ===
+export const blockchainAPI = {
+  // Networks
+  getNetworks: async () => {
+    const response = await apiClient.get("/blockchain/networks");
+    return response.data;
+  },
+
+  getNetworkStatus: async (network: string) => {
+    const response = await apiClient.get(`/blockchain/networks/${network}/status`);
+    return response.data;
+  },
+
+  getGasEstimate: async (network: string) => {
+    const response = await apiClient.get("/blockchain/gas-estimate", {
+      params: { network },
+    });
+    return response.data;
+  },
+
+  // Wallets
+  createWallet: async (data: { address: string; network: string; label?: string }) => {
+    const response = await apiClient.post("/blockchain/wallets", data);
+    return response.data;
+  },
+
+  verifyWallet: async (data: { wallet_id: string; message: string; signature: string }) => {
+    const response = await apiClient.post("/blockchain/wallets/verify", data);
+    return response.data;
+  },
+
+  listWallets: async () => {
+    const response = await apiClient.get("/blockchain/wallets");
+    return response.data;
+  },
+
+  getWalletBalance: async (walletId: string) => {
+    const response = await apiClient.get(`/blockchain/wallets/${walletId}/balance`);
+    return response.data;
+  },
+
+  deleteWallet: async (walletId: string) => {
+    await apiClient.delete(`/blockchain/wallets/${walletId}`);
+  },
+
+  // Tokens
+  createToken: async (data: {
+    proyecto_id: string;
+    nombre: string;
+    simbolo: string;
+    supply_total: number;
+    precio_por_token: number;
+    network: string;
+  }) => {
+    const response = await apiClient.post("/blockchain/tokens", data);
+    return response.data;
+  },
+
+  listTokens: async (params?: { proyecto_id?: string; activo?: boolean }) => {
+    const response = await apiClient.get("/blockchain/tokens", { params });
+    return response.data;
+  },
+
+  getTokenStats: async (tokenId: string) => {
+    const response = await apiClient.get(`/blockchain/tokens/${tokenId}/stats`);
+    return response.data;
+  },
+
+  activateToken: async (tokenId: string, contractAddress: string) => {
+    const response = await apiClient.post(`/blockchain/tokens/${tokenId}/activate`, {
+      contract_address: contractAddress,
+    });
+    return response.data;
+  },
+
+  getTokenHolders: async (tokenId: string) => {
+    const response = await apiClient.get(`/blockchain/tokens/${tokenId}/holders`);
+    return response.data;
+  },
+
+  purchaseTokens: async (data: { token_id: string; cantidad: number; wallet_id: string }) => {
+    const response = await apiClient.post("/blockchain/tokens/purchase", data);
+    return response.data;
+  },
+
+  transferTokens: async (data: {
+    token_id: string;
+    from_wallet_id: string;
+    to_address: string;
+    cantidad: number;
+  }) => {
+    const response = await apiClient.post("/blockchain/tokens/transfer", data);
+    return response.data;
+  },
+
+  // Portfolio
+  getPortfolio: async (walletId?: string) => {
+    const response = await apiClient.get("/blockchain/portfolio", {
+      params: walletId ? { wallet_id: walletId } : {},
+    });
+    return response.data;
+  },
+
+  // Dividends
+  createDividend: async (data: {
+    token_id: string;
+    monto_total: number;
+    descripcion?: string;
+  }) => {
+    const response = await apiClient.post("/blockchain/dividends", data);
+    return response.data;
+  },
+
+  calculateDividends: async (tokenId: string) => {
+    const response = await apiClient.get(`/blockchain/dividends/calculate/${tokenId}`);
+    return response.data;
+  },
+
+  claimDividend: async (data: { distribution_id: string; wallet_id: string }) => {
+    const response = await apiClient.post("/blockchain/dividends/claim", data);
+    return response.data;
+  },
+
+  getDividendHistory: async (tokenId: string) => {
+    const response = await apiClient.get(`/blockchain/dividends/${tokenId}/history`);
+    return response.data;
+  },
+
+  // Transactions
+  listTransactions: async (params?: {
+    wallet_id?: string;
+    tipo?: string;
+    limit?: number;
+  }) => {
+    const response = await apiClient.get("/blockchain/transactions", { params });
+    return response.data;
+  },
+
+  getTransaction: async (txId: string) => {
+    const response = await apiClient.get(`/blockchain/transactions/${txId}`);
+    return response.data;
+  },
+
+  // KYC
+  registerKYC: async () => {
+    const response = await apiClient.post("/blockchain/kyc/register");
+    return response.data;
+  },
+
+  getKYCStatus: async (userId: string) => {
+    const response = await apiClient.get(`/blockchain/kyc/${userId}`);
+    return response.data;
+  },
+};
+
+// === AUDIT API ===
+export const auditAPI = {
+  // Contract Auditing
+  auditContract: async (data: { contract_path: string; generate_html?: boolean }) => {
+    const response = await apiClient.post("/audit/contracts/audit", data);
+    return response.data;
+  },
+
+  listDetectors: async () => {
+    const response = await apiClient.get("/audit/contracts/audit/detectors");
+    return response.data;
+  },
+
+  // Transaction Monitoring
+  analyzeTransaction: async (data: {
+    tx_hash: string;
+    from_address: string;
+    to_address: string;
+    value: number;
+    gas_price: number;
+    input_data?: string;
+    network?: string;
+  }) => {
+    const response = await apiClient.post("/audit/monitoring/analyze-transaction", data);
+    return response.data;
+  },
+
+  getAlerts: async (params?: { limit?: number; severity?: string }) => {
+    const response = await apiClient.get("/audit/monitoring/alerts", { params });
+    return response.data;
+  },
+
+  acknowledgeAlert: async (alertId: string) => {
+    const response = await apiClient.post(`/audit/monitoring/alerts/${alertId}/acknowledge`);
+    return response.data;
+  },
+
+  getMonitoringStatistics: async () => {
+    const response = await apiClient.get("/audit/monitoring/statistics");
+    return response.data;
+  },
+
+  // Incidents
+  createIncident: async (data: {
+    title: string;
+    description: string;
+    severity: "sev1" | "sev2" | "sev3" | "sev4";
+    affected_contracts?: string[];
+    related_transactions?: string[];
+  }) => {
+    const response = await apiClient.post("/audit/incidents", data);
+    return response.data;
+  },
+
+  listIncidents: async (activeOnly?: boolean) => {
+    const response = await apiClient.get("/audit/incidents", {
+      params: { active_only: activeOnly },
+    });
+    return response.data;
+  },
+
+  containIncident: async (incidentId: string) => {
+    const response = await apiClient.post(`/audit/incidents/${incidentId}/contain`);
+    return response.data;
+  },
+
+  resolveIncident: async (incidentId: string, rootCause?: string) => {
+    const response = await apiClient.post(`/audit/incidents/${incidentId}/resolve`, null, {
+      params: { root_cause: rootCause },
+    });
+    return response.data;
+  },
+
+  getPostmortem: async (incidentId: string) => {
+    const response = await apiClient.get(`/audit/incidents/${incidentId}/postmortem`);
+    return response.data;
+  },
+
+  getIncidentStatistics: async () => {
+    const response = await apiClient.get("/audit/incidents/statistics");
+    return response.data;
+  },
+
+  // Dashboard
+  getDashboard: async () => {
+    const response = await apiClient.get("/audit/dashboard");
+    return response.data;
+  },
+};
+
 export default apiClient;

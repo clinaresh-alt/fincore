@@ -14,6 +14,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
+import { PageHeader } from "@/components/page-header";
 
 interface Document {
   id: string;
@@ -74,18 +75,17 @@ export default function DocumentsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Documentos</h1>
-          <p className="text-muted-foreground mt-1">
-            Gestion de documentos KYC y fiscales
-          </p>
-        </div>
-        <Button>
-          <Upload className="mr-2 h-4 w-4" />
-          Subir Documento
-        </Button>
-      </div>
+      <PageHeader
+        title="Documentos"
+        description="Gestion de documentos KYC y fiscales"
+        backHref="/dashboard"
+        actions={
+          <Button>
+            <Upload className="mr-2 h-4 w-4" />
+            Subir Documento
+          </Button>
+        }
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

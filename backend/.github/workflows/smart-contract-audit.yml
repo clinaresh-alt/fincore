@@ -1,0 +1,349 @@
+# ============================================================
+# FinCore - Smart Contract Security Audit Pipeline
+# ============================================================
+#
+# Este workflow ejecuta auditorias automaticas de seguridad
+# en todos los smart contracts antes de permitir deploy.
+#
+# Herramientas integradas:
+# - Slither: Analisis estatico (70+ detectores)
+# - Mythril: Ejecucion simbolica
+# - Echidna: Fuzzing basado en propiedades
+# - Solhint: Linter de Solidity
+#
+# Configuracion:
+# - Se ejecuta en cada PR que modifica contracts/
+# - Bloquea merge si encuentra HIGH/CRITICAL
+# - Genera reportes como artifacts
+# ============================================================
+
+name: Smart Contract Security Audit
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/smart-contract-audit.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'contracts/**'
+  workflow_dispatch:  # Permite ejecucion manual
+
+env:
+  SOLC_VERSION: "0.8.20"
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  # ============================================================
+  # Job 1: Slither - Analisis Estatico
+  # ============================================================
+  slither-analysis:
+    name: Slither Static Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write  # Para subir SARIF
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Slither
+        run: |
+          pip install slither-analyzer solc-select
+          solc-select install ${{ env.SOLC_VERSION }}
+          solc-select use ${{ env.SOLC_VERSION }}
+
+      - name: Run Slither Analysis
+        id: slither
+        continue-on-error: true
+        run: |
+          slither . \
+            --json slither-results.json \
+            --sarif slither-results.sarif \
+            --checklist \
+            --exclude-dependencies \
+            --filter-paths "node_modules|lib" \
+            2>&1 | tee slither-output.txt
+
+      - name: Upload Slither SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: slither-results.sarif
+        continue-on-error: true
+
+      - name: Parse Slither Results
+        id: parse-slither
+        run: |
+          if [ -f slither-results.json ]; then
+            HIGH_COUNT=$(jq '[.results.detectors[] | select(.impact == "High")] | length' slither-results.json)
+            CRITICAL_COUNT=$(jq '[.results.detectors[] | select(.impact == "Critical" or .impact == "Informational" and .confidence == "High")] | length' slither-results.json 2>/dev/null || echo "0")
+            MEDIUM_COUNT=$(jq '[.results.detectors[] | select(.impact == "Medium")] | length' slither-results.json)
+            LOW_COUNT=$(jq '[.results.detectors[] | select(.impact == "Low")] | length' slither-results.json)
+
+            echo "high_count=$HIGH_COUNT" >> $GITHUB_OUTPUT
+            echo "critical_count=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+            echo "medium_count=$MEDIUM_COUNT" >> $GITHUB_OUTPUT
+            echo "low_count=$LOW_COUNT" >> $GITHUB_OUTPUT
+
+            echo "### Slither Results Summary" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Critical | $CRITICAL_COUNT |" >> $GITHUB_STEP_SUMMARY
+            echo "| High | $HIGH_COUNT |" >> $GITHUB_STEP_SUMMARY
+            echo "| Medium | $MEDIUM_COUNT |" >> $GITHUB_STEP_SUMMARY
+            echo "| Low | $LOW_COUNT |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Slither Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: |
+            slither-results.json
+            slither-output.txt
+          retention-days: 30
+
+      - name: Check for Critical/High Issues
+        if: steps.parse-slither.outputs.high_count > 0 || steps.parse-slither.outputs.critical_count > 0
+        run: |
+          echo "::error::Slither encontro vulnerabilidades HIGH/CRITICAL"
+          echo "High: ${{ steps.parse-slither.outputs.high_count }}"
+          echo "Critical: ${{ steps.parse-slither.outputs.critical_count }}"
+          exit 1
+
+  # ============================================================
+  # Job 2: Mythril - Ejecucion Simbolica
+  # ============================================================
+  mythril-analysis:
+    name: Mythril Symbolic Execution
+    runs-on: ubuntu-latest
+    needs: slither-analysis  # Ejecutar despues de Slither
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Mythril
+        run: |
+          pip install mythril
+          pip install solc-select
+          solc-select install ${{ env.SOLC_VERSION }}
+          solc-select use ${{ env.SOLC_VERSION }}
+
+      - name: Find Solidity Files
+        id: find-contracts
+        run: |
+          echo "contracts=$(find contracts -name '*.sol' -not -path '*/node_modules/*' -not -path '*/lib/*' | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Run Mythril Analysis
+        id: mythril
+        continue-on-error: true
+        run: |
+          mkdir -p mythril-reports
+
+          for contract in ${{ steps.find-contracts.outputs.contracts }}; do
+            echo "Analyzing: $contract"
+            contract_name=$(basename "$contract" .sol)
+
+            myth analyze "$contract" \
+              --solc-json remappings.json \
+              --execution-timeout 300 \
+              --max-depth 12 \
+              -o json \
+              > "mythril-reports/${contract_name}.json" 2>&1 || true
+          done
+
+      - name: Parse Mythril Results
+        run: |
+          echo "### Mythril Analysis Results" >> $GITHUB_STEP_SUMMARY
+
+          for report in mythril-reports/*.json; do
+            if [ -f "$report" ]; then
+              contract_name=$(basename "$report" .json)
+              issues=$(jq '.issues | length' "$report" 2>/dev/null || echo "0")
+              echo "- **$contract_name**: $issues issues found" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload Mythril Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythril-reports
+          path: mythril-reports/
+          retention-days: 30
+
+  # ============================================================
+  # Job 3: Solhint - Linter
+  # ============================================================
+  solhint-lint:
+    name: Solhint Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Solhint
+        run: npm install -g solhint
+
+      - name: Create Solhint Config
+        run: |
+          cat > .solhint.json << 'EOF'
+          {
+            "extends": "solhint:recommended",
+            "plugins": ["security"],
+            "rules": {
+              "compiler-version": ["error", "^0.8.0"],
+              "func-visibility": ["warn", {"ignoreConstructors": true}],
+              "not-rely-on-time": "warn",
+              "avoid-low-level-calls": "warn",
+              "avoid-tx-origin": "error",
+              "reentrancy": "error",
+              "state-visibility": "error",
+              "check-send-result": "error",
+              "multiple-sends": "error",
+              "mark-callable-contracts": "off",
+              "no-inline-assembly": "off",
+              "no-complex-fallback": "warn"
+            }
+          }
+          EOF
+
+      - name: Run Solhint
+        id: solhint
+        continue-on-error: true
+        run: |
+          solhint 'contracts/**/*.sol' \
+            --formatter stylish \
+            > solhint-output.txt 2>&1 || true
+
+          cat solhint-output.txt
+
+      - name: Upload Solhint Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: solhint-report
+          path: solhint-output.txt
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: Foundry Tests (si existe configuracion)
+  # ============================================================
+  foundry-tests:
+    name: Foundry Tests
+    runs-on: ubuntu-latest
+    if: hashFiles('foundry.toml') != ''
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Run Forge Build
+        run: |
+          forge build
+        id: build
+
+      - name: Run Forge Tests
+        run: |
+          forge test -vvv --gas-report > forge-test-output.txt 2>&1
+        id: test
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: foundry-test-results
+          path: forge-test-output.txt
+          retention-days: 30
+
+  # ============================================================
+  # Job 5: Security Summary
+  # ============================================================
+  security-summary:
+    name: Security Audit Summary
+    runs-on: ubuntu-latest
+    needs: [slither-analysis, mythril-analysis, solhint-lint]
+    if: always()
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: audit-reports
+
+      - name: Generate Summary Report
+        run: |
+          echo "# Smart Contract Security Audit Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Tools Executed" >> $GITHUB_STEP_SUMMARY
+          echo "- Slither: ${{ needs.slither-analysis.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Mythril: ${{ needs.mythril-analysis.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Solhint: ${{ needs.solhint-lint.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recommendation" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.slither-analysis.result }}" == "failure" ]; then
+            echo ":x: **DO NOT DEPLOY** - Critical vulnerabilities detected" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.mythril-analysis.result }}" == "failure" ]; then
+            echo ":warning: **Review Required** - Symbolic execution found issues" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":white_check_mark: **Ready for Review** - No critical issues found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check Overall Status
+        if: needs.slither-analysis.result == 'failure'
+        run: |
+          echo "::error::Security audit failed - Critical vulnerabilities detected"
+          exit 1

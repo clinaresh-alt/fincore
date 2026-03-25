@@ -18,6 +18,7 @@ import {
   Bot,
 } from "lucide-react";
 import Link from "next/link";
+import { PageHeader } from "@/components/page-header";
 import { formatCurrency } from "@/lib/utils";
 
 interface User {
@@ -57,20 +58,19 @@ export default function AdminPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Administracion</h1>
-          <p className="text-muted-foreground mt-1">
-            Panel de control del sistema
-          </p>
-        </div>
-        <Link href="/admin/settings">
-          <Button variant="outline">
-            <Settings className="mr-2 h-4 w-4" />
-            Configuracion del Sistema
-          </Button>
-        </Link>
-      </div>
+      <PageHeader
+        title="Administracion"
+        description="Panel de control del sistema"
+        backHref="/dashboard"
+        actions={
+          <Link href="/admin/settings">
+            <Button variant="outline">
+              <Settings className="mr-2 h-4 w-4" />
+              Configuracion del Sistema
+            </Button>
+          </Link>
+        }
+      />
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

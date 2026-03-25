@@ -34,6 +34,7 @@ import {
   Settings,
 } from "lucide-react";
 import { SectorMetricsForm } from "@/components/sector-metrics-form";
+import { PageHeader } from "@/components/page-header";
 import { formatCurrency, formatPercentage, getRiskLevelColor } from "@/lib/utils";
 
 interface Evaluation {
@@ -197,12 +198,11 @@ export default function EvaluationsPage() {
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Evaluaciones de Proyectos</h1>
-        <p className="text-muted-foreground mt-1">
-          Panel completo de evaluacion financiera con indicadores basicos y sectoriales
-        </p>
-      </div>
+      <PageHeader
+        title="Evaluaciones de Proyectos"
+        description="Panel completo de evaluacion financiera con indicadores basicos y sectoriales"
+        backHref="/dashboard"
+      />
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">

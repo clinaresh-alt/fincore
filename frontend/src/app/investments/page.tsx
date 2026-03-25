@@ -14,6 +14,7 @@ import {
   Wallet,
   PiggyBank,
 } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 
 const statusColors: Record<string, string> = {
   Pendiente: "text-yellow-600 bg-yellow-100",
@@ -64,12 +65,11 @@ export default function InvestmentsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Mis Inversiones</h1>
-        <p className="text-muted-foreground mt-1">
-          Seguimiento de tu portafolio de inversiones
-        </p>
-      </div>
+      <PageHeader
+        title="Mis Inversiones"
+        description="Seguimiento de tu portafolio de inversiones"
+        backHref="/dashboard"
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
