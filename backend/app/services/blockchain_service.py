@@ -13,7 +13,7 @@ import os
 import logging
 
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+from web3.middleware import ExtraDataToPOAMiddleware
 from web3.exceptions import ContractLogicError, TransactionNotFound
 from eth_account import Account
 from eth_account.messages import encode_defunct
@@ -162,7 +162,7 @@ class BlockchainService:
 
         # Middleware para redes PoA (Polygon, etc)
         if network in [BlockchainNetwork.POLYGON, BlockchainNetwork.POLYGON_MUMBAI]:
-            self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+            self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
         # Cuenta operadora (para firmar transacciones del sistema)
         self._private_key = private_key or os.getenv("BLOCKCHAIN_OPERATOR_KEY")
@@ -199,7 +199,7 @@ class BlockchainService:
             self.w3 = Web3(Web3.HTTPProvider(self.config.rpc_url))
 
             if network in [BlockchainNetwork.POLYGON, BlockchainNetwork.POLYGON_MUMBAI]:
-                self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+                self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
             return self.is_connected
         except Exception as e:

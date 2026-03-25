@@ -61,7 +61,7 @@ class TimeSeriesDataResponse(BaseModel):
 
 @router.get("/overview")
 async def get_platform_overview(
-    time_range: str = Query(default="30d", regex="^(1d|7d|30d|90d|365d|all)$"),
+    time_range: str = Query(default="30d", pattern="^(1d|7d|30d|90d|365d|all)$"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -122,8 +122,8 @@ async def get_platform_overview(
 
 @router.get("/investments/timeline")
 async def get_investment_timeline(
-    time_range: str = Query(default="30d", regex="^(1d|7d|30d|90d|365d|all)$"),
-    granularity: str = Query(default="day", regex="^(hour|day|week|month)$"),
+    time_range: str = Query(default="30d", pattern="^(1d|7d|30d|90d|365d|all)$"),
+    granularity: str = Query(default="day", pattern="^(hour|day|week|month)$"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -188,7 +188,7 @@ async def get_investor_distribution(
 
 @router.get("/transactions/stats")
 async def get_transaction_stats(
-    time_range: str = Query(default="30d", regex="^(1d|7d|30d|90d|365d|all)$"),
+    time_range: str = Query(default="30d", pattern="^(1d|7d|30d|90d|365d|all)$"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -216,7 +216,7 @@ async def get_security_metrics(
 
 @router.get("/revenue")
 async def get_revenue_metrics(
-    time_range: str = Query(default="30d", regex="^(1d|7d|30d|90d|365d|all)$"),
+    time_range: str = Query(default="30d", pattern="^(1d|7d|30d|90d|365d|all)$"),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -245,7 +245,7 @@ async def get_kpi_summary(
 
 @router.get("/dashboard")
 async def get_dashboard_data(
-    time_range: str = Query(default="30d", regex="^(1d|7d|30d|90d|365d|all)$"),
+    time_range: str = Query(default="30d", pattern="^(1d|7d|30d|90d|365d|all)$"),
     current_user: User = Depends(get_current_user),
 ):
     """
