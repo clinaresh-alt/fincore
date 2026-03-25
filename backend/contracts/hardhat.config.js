@@ -26,10 +26,11 @@ module.exports = {
       chainId: 137,
       accounts: process.env.BLOCKCHAIN_OPERATOR_KEY ? [process.env.BLOCKCHAIN_OPERATOR_KEY] : []
     },
-    polygonMumbai: {
-      url: process.env.POLYGON_MUMBAI_RPC_URL || "https://rpc-mumbai.maticvigil.com",
-      chainId: 80001,
-      accounts: process.env.BLOCKCHAIN_OPERATOR_KEY ? [process.env.BLOCKCHAIN_OPERATOR_KEY] : []
+    polygonAmoy: {
+      url: process.env.POLYGON_AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
+      chainId: 80002,
+      accounts: process.env.BLOCKCHAIN_OPERATOR_KEY ? [process.env.BLOCKCHAIN_OPERATOR_KEY] : [],
+      gasPrice: "auto"
     },
     sepolia: {
       url: process.env.ETHEREUM_SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
@@ -50,11 +51,21 @@ module.exports = {
   etherscan: {
     apiKey: {
       polygon: process.env.POLYGONSCAN_API_KEY || "",
-      polygonMumbai: process.env.POLYGONSCAN_API_KEY || "",
+      polygonAmoy: process.env.POLYGONSCAN_API_KEY || "",
       sepolia: process.env.ETHERSCAN_API_KEY || "",
       arbitrumOne: process.env.ARBISCAN_API_KEY || "",
       base: process.env.BASESCAN_API_KEY || ""
-    }
+    },
+    customChains: [
+      {
+        network: "polygonAmoy",
+        chainId: 80002,
+        urls: {
+          apiURL: "https://api-amoy.polygonscan.com/api",
+          browserURL: "https://amoy.polygonscan.com"
+        }
+      }
+    ]
   },
   paths: {
     sources: "./src",

@@ -15,6 +15,8 @@ import {
   Users,
   Coins,
   ShieldCheck,
+  Rocket,
+  BarChart3,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -67,6 +69,24 @@ const navigation = [
     href: "/audit",
     icon: ShieldCheck,
     roles: ["Admin"],
+  },
+  {
+    name: "Compliance PLD",
+    href: "/compliance",
+    icon: Shield,
+    roles: ["Admin", "Analista"],
+  },
+  {
+    name: "Deployment",
+    href: "/admin/deployment",
+    icon: Rocket,
+    roles: ["Admin"],
+  },
+  {
+    name: "Analytics",
+    href: "/analytics",
+    icon: BarChart3,
+    roles: ["Admin", "Analista"],
   },
   {
     name: "Administracion",

@@ -67,14 +67,17 @@ class Settings(BaseSettings):
     # ==================== BLOCKCHAIN ====================
     BLOCKCHAIN_DEFAULT_NETWORK: str = "polygon"
     BLOCKCHAIN_OPERATOR_KEY: str = ""
+    ENCRYPTION_MASTER_KEY: str = ""  # Para encriptar llaves privadas custodiales
 
-    # RPC URLs
+    # RPC URLs - Redes de produccion
     POLYGON_RPC_URL: str = "https://polygon-rpc.com"
-    POLYGON_MUMBAI_RPC_URL: str = "https://rpc-mumbai.maticvigil.com"
     ETHEREUM_RPC_URL: str = "https://eth.llamarpc.com"
-    ETHEREUM_SEPOLIA_RPC_URL: str = "https://rpc.sepolia.org"
     ARBITRUM_RPC_URL: str = "https://arb1.arbitrum.io/rpc"
     BASE_RPC_URL: str = "https://mainnet.base.org"
+
+    # RPC URLs - Testnets
+    POLYGON_AMOY_RPC_URL: str = "https://rpc-amoy.polygon.technology"
+    ETHEREUM_SEPOLIA_RPC_URL: str = "https://rpc.sepolia.org"
 
     # Block Explorer API Keys
     POLYGONSCAN_API_KEY: str = ""
@@ -86,11 +89,28 @@ class Settings(BaseSettings):
     FINCORE_INVESTMENT_CONTRACT: str = ""
     FINCORE_KYC_CONTRACT: str = ""
     FINCORE_DIVIDENDS_CONTRACT: str = ""
-    USDC_TOKEN_ADDRESS: str = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+    FINCORE_TOKEN_FACTORY_CONTRACT: str = ""
+
+    # USDC Token Addresses por red (direcciones oficiales)
+    USDC_POLYGON: str = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"  # USDC nativo Polygon
+    USDC_POLYGON_BRIDGED: str = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"  # USDC.e bridged
+    USDC_ETHEREUM: str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    USDC_ARBITRUM: str = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"  # USDC nativo
+    USDC_BASE: str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    USDC_POLYGON_AMOY: str = "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582"  # Testnet
+    USDC_SEPOLIA: str = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238"  # Testnet
 
     # Gas Configuration
     GAS_PRICE_MULTIPLIER: float = 1.1
     MAX_GAS_PRICE_GWEI: int = 500
+
+    # Network Chain IDs
+    POLYGON_CHAIN_ID: int = 137
+    POLYGON_AMOY_CHAIN_ID: int = 80002
+    ETHEREUM_CHAIN_ID: int = 1
+    ETHEREUM_SEPOLIA_CHAIN_ID: int = 11155111
+    ARBITRUM_CHAIN_ID: int = 42161
+    BASE_CHAIN_ID: int = 8453
 
     class Config:
         env_file = ".env"

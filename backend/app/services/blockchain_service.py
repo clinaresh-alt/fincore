@@ -71,6 +71,7 @@ class GasEstimate:
 
 # Configuraciones de redes soportadas
 NETWORK_CONFIGS: Dict[BlockchainNetwork, NetworkConfig] = {
+    # ==================== MAINNETS ====================
     BlockchainNetwork.POLYGON: NetworkConfig(
         rpc_url=os.getenv("POLYGON_RPC_URL", "https://polygon-rpc.com"),
         chain_id=137,
@@ -79,14 +80,6 @@ NETWORK_CONFIGS: Dict[BlockchainNetwork, NetworkConfig] = {
         block_explorer="https://polygonscan.com",
         is_testnet=False,
     ),
-    BlockchainNetwork.POLYGON_MUMBAI: NetworkConfig(
-        rpc_url=os.getenv("POLYGON_MUMBAI_RPC_URL", "https://rpc-mumbai.maticvigil.com"),
-        chain_id=80001,
-        name="Polygon Mumbai Testnet",
-        currency_symbol="MATIC",
-        block_explorer="https://mumbai.polygonscan.com",
-        is_testnet=True,
-    ),
     BlockchainNetwork.ETHEREUM: NetworkConfig(
         rpc_url=os.getenv("ETHEREUM_RPC_URL", "https://eth.llamarpc.com"),
         chain_id=1,
@@ -94,14 +87,6 @@ NETWORK_CONFIGS: Dict[BlockchainNetwork, NetworkConfig] = {
         currency_symbol="ETH",
         block_explorer="https://etherscan.io",
         is_testnet=False,
-    ),
-    BlockchainNetwork.ETHEREUM_SEPOLIA: NetworkConfig(
-        rpc_url=os.getenv("ETHEREUM_SEPOLIA_RPC_URL", "https://rpc.sepolia.org"),
-        chain_id=11155111,
-        name="Ethereum Sepolia Testnet",
-        currency_symbol="ETH",
-        block_explorer="https://sepolia.etherscan.io",
-        is_testnet=True,
     ),
     BlockchainNetwork.ARBITRUM: NetworkConfig(
         rpc_url=os.getenv("ARBITRUM_RPC_URL", "https://arb1.arbitrum.io/rpc"),
@@ -118,6 +103,32 @@ NETWORK_CONFIGS: Dict[BlockchainNetwork, NetworkConfig] = {
         currency_symbol="ETH",
         block_explorer="https://basescan.org",
         is_testnet=False,
+    ),
+    # ==================== TESTNETS ====================
+    BlockchainNetwork.POLYGON_AMOY: NetworkConfig(
+        rpc_url=os.getenv("POLYGON_AMOY_RPC_URL", "https://rpc-amoy.polygon.technology"),
+        chain_id=80002,
+        name="Polygon Amoy Testnet",
+        currency_symbol="MATIC",
+        block_explorer="https://amoy.polygonscan.com",
+        is_testnet=True,
+    ),
+    BlockchainNetwork.ETHEREUM_SEPOLIA: NetworkConfig(
+        rpc_url=os.getenv("ETHEREUM_SEPOLIA_RPC_URL", "https://rpc.sepolia.org"),
+        chain_id=11155111,
+        name="Ethereum Sepolia Testnet",
+        currency_symbol="ETH",
+        block_explorer="https://sepolia.etherscan.io",
+        is_testnet=True,
+    ),
+    # ==================== LEGACY (Deprecated) ====================
+    BlockchainNetwork.POLYGON_MUMBAI: NetworkConfig(
+        rpc_url=os.getenv("POLYGON_AMOY_RPC_URL", "https://rpc-amoy.polygon.technology"),  # Redirigir a Amoy
+        chain_id=80002,  # Usar Amoy chain ID
+        name="Polygon Mumbai (Deprecated -> Amoy)",
+        currency_symbol="MATIC",
+        block_explorer="https://amoy.polygonscan.com",
+        is_testnet=True,
     ),
 }
 

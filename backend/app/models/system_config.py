@@ -14,9 +14,11 @@ from app.core.database import Base
 class ConfigCategory(str, enum.Enum):
     """Categorias de configuracion."""
     AI_INTEGRATION = "ai_integration"
+    BLOCKCHAIN = "blockchain"
     SECURITY = "security"
     NOTIFICATIONS = "notifications"
     EXTERNAL_APIS = "external_apis"
+    SYSTEM = "system"
     GENERAL = "general"
 
 
@@ -89,5 +91,137 @@ SYSTEM_CONFIG_DEFINITIONS = {
         "category": ConfigCategory.EXTERNAL_APIS,
         "description": "API Key para integracion fiscal",
         "is_encrypted": True
+    },
+    # Blockchain configs
+    "blockchain_walletconnect_project_id": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "WalletConnect Project ID para conexion de wallets",
+        "is_encrypted": False
+    },
+    "blockchain_investment_contract": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Direccion del contrato de inversion",
+        "is_encrypted": False
+    },
+    "blockchain_kyc_contract": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Direccion del contrato de KYC",
+        "is_encrypted": False
+    },
+    "blockchain_dividends_contract": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Direccion del contrato de dividendos",
+        "is_encrypted": False
+    },
+    "blockchain_token_factory_contract": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Direccion del contrato Token Factory",
+        "is_encrypted": False
+    },
+    "blockchain_default_network": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Red blockchain por defecto (polygon, ethereum, arbitrum, base)",
+        "is_encrypted": False
+    },
+    "blockchain_is_testnet": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "Modo testnet habilitado",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_polygon": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Polygon",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_ethereum": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Ethereum",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_arbitrum": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Arbitrum",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_base": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Base",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_polygon_amoy": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Polygon Amoy (testnet)",
+        "is_encrypted": False
+    },
+    "blockchain_rpc_sepolia": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "RPC URL para Sepolia (testnet)",
+        "is_encrypted": False
+    },
+    "blockchain_api_polygonscan": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "API Key de Polygonscan",
+        "is_encrypted": True
+    },
+    "blockchain_api_etherscan": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "API Key de Etherscan",
+        "is_encrypted": True
+    },
+    "blockchain_api_arbiscan": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "API Key de Arbiscan",
+        "is_encrypted": True
+    },
+    "blockchain_api_basescan": {
+        "category": ConfigCategory.BLOCKCHAIN,
+        "description": "API Key de Basescan",
+        "is_encrypted": True
+    },
+    # System configs
+    "system_app_name": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Nombre de la aplicacion",
+        "is_encrypted": False
+    },
+    "system_app_version": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Version de la aplicacion",
+        "is_encrypted": False
+    },
+    "system_debug_mode": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Modo debug habilitado",
+        "is_encrypted": False
+    },
+    "system_api_timeout": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Timeout del API en ms",
+        "is_encrypted": False
+    },
+    "system_max_upload_size": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Tamano maximo de archivo (MB)",
+        "is_encrypted": False
+    },
+    "system_session_timeout": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Timeout de sesion (minutos)",
+        "is_encrypted": False
+    },
+    "system_kyc_required": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "KYC obligatorio para invertir",
+        "is_encrypted": False
+    },
+    "system_min_investment": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Inversion minima (MXN)",
+        "is_encrypted": False
+    },
+    "system_max_investment": {
+        "category": ConfigCategory.SYSTEM,
+        "description": "Inversion maxima (MXN)",
+        "is_encrypted": False
     }
 }

@@ -490,6 +490,134 @@ export const blockchainAPI = {
   },
 };
 
+// === COMPLIANCE API ===
+export const complianceAPI = {
+  // Dashboard
+  getDashboard: async () => {
+    const response = await apiClient.get("/compliance/dashboard");
+    return response.data;
+  },
+
+  // KYC
+  getKYCProfile: async () => {
+    const response = await apiClient.get("/compliance/kyc/profile");
+    return response.data;
+  },
+
+  updateKYCProfile: async (data: {
+    first_name?: string;
+    last_name?: string;
+    curp?: string;
+    rfc?: string;
+    date_of_birth?: string;
+    nationality?: string;
+    street_address?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    occupation?: string;
+    source_of_funds?: string;
+  }) => {
+    const response = await apiClient.put("/compliance/kyc/profile", data);
+    return response.data;
+  },
+
+  verifyCURP: async (curp: string) => {
+    const response = await apiClient.post("/compliance/kyc/verify-curp", { curp });
+    return response.data;
+  },
+
+  getRiskScore: async () => {
+    const response = await apiClient.get("/compliance/kyc/risk-score");
+    return response.data;
+  },
+
+  // KYC Documents
+  listDocuments: async () => {
+    const response = await apiClient.get("/compliance/kyc/documents");
+    return response.data;
+  },
+
+  uploadDocument: async (documentType: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await apiClient.post(
+      `/compliance/kyc/documents?document_type=${documentType}`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  },
+
+  // AML Alerts
+  listAlerts: async (params?: { status?: string; severity?: string; limit?: number }) => {
+    const response = await apiClient.get("/compliance/aml/alerts", { params });
+    return response.data;
+  },
+
+  getAlert: async (alertId: string) => {
+    const response = await apiClient.get(`/compliance/aml/alerts/${alertId}`);
+    return response.data;
+  },
+
+  investigateAlert: async (alertId: string, notes: string) => {
+    const response = await apiClient.post(`/compliance/aml/alerts/${alertId}/investigate`, { notes });
+    return response.data;
+  },
+
+  escalateAlert: async (alertId: string) => {
+    const response = await apiClient.post(`/compliance/aml/alerts/${alertId}/escalate`);
+    return response.data;
+  },
+
+  closeAlert: async (alertId: string, data: { false_positive: boolean; notes: string }) => {
+    const response = await apiClient.post(`/compliance/aml/alerts/${alertId}/close`, data);
+    return response.data;
+  },
+
+  getAMLStatistics: async () => {
+    const response = await apiClient.get("/compliance/aml/statistics");
+    return response.data;
+  },
+
+  // Reports
+  listReports: async (params?: { report_type?: string; status?: string }) => {
+    const response = await apiClient.get("/compliance/reports", { params });
+    return response.data;
+  },
+
+  generateROV: async (periodStart: string, periodEnd: string) => {
+    const response = await apiClient.post("/compliance/reports/rov", {
+      period_start: periodStart,
+      period_end: periodEnd,
+    });
+    return response.data;
+  },
+
+  generateROS: async (alertIds: string[], narrative: string) => {
+    const response = await apiClient.post("/compliance/reports/ros", {
+      alert_ids: alertIds,
+      narrative,
+    });
+    return response.data;
+  },
+
+  approveReport: async (reportId: string) => {
+    const response = await apiClient.post(`/compliance/reports/${reportId}/approve`);
+    return response.data;
+  },
+
+  submitReport: async (reportId: string) => {
+    const response = await apiClient.post(`/compliance/reports/${reportId}/submit`);
+    return response.data;
+  },
+
+  downloadReportXML: async (reportId: string) => {
+    const response = await apiClient.get(`/compliance/reports/${reportId}/xml`);
+    return response.data;
+  },
+};
+
 // === AUDIT API ===
 export const auditAPI = {
   // Contract Auditing

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth-store";
 import { Sidebar } from "@/components/layout/sidebar";
+import { NotificationDropdown, NotificationToastProvider } from "@/components/notifications";
 
 export default function DashboardLayout({
   children,
@@ -11,7 +12,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { isAuthenticated, fetchUser, isLoading } = useAuthStore();
+  const { isAuthenticated, fetchUser, isLoading, user } = useAuthStore();
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -45,9 +46,20 @@ export default function DashboardLayout({
   return (
     <div className="flex h-screen bg-slate-100">
       <Sidebar />
-      <main className="flex-1 overflow-auto">
-        <div className="p-8">{children}</div>
-      </main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header con notificaciones */}
+        <header className="h-16 border-b bg-white flex items-center justify-end px-6 gap-4">
+          <span className="text-sm text-muted-foreground mr-auto">
+            {user?.email}
+          </span>
+          <NotificationDropdown />
+        </header>
+        <main className="flex-1 overflow-auto">
+          <div className="p-8">{children}</div>
+        </main>
+      </div>
+      {/* Toast notifications */}
+      <NotificationToastProvider />
     </div>
   );
 }

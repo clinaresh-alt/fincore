@@ -4,7 +4,7 @@ Agrupa todos los endpoints.
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, projects, investor, admin, sector_metrics, companies, blockchain, audit
+from app.api.v1.endpoints import auth, projects, investor, admin, sector_metrics, companies, blockchain, audit, compliance, deployments, notifications, analytics
 
 api_router = APIRouter()
 
@@ -17,3 +17,7 @@ api_router.include_router(sector_metrics.router)
 api_router.include_router(companies.router)
 api_router.include_router(blockchain.router)
 api_router.include_router(audit.router, prefix="/audit", tags=["Smart Contract Audit"])
+api_router.include_router(compliance.router, prefix="/compliance", tags=["Compliance PLD/AML"])
+api_router.include_router(deployments.router, prefix="/admin", tags=["Smart Contract Deployment"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics Dashboard"])

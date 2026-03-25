@@ -17,13 +17,16 @@ from app.core.database import Base
 
 class BlockchainNetwork(str, enum.Enum):
     """Redes blockchain soportadas."""
+    # Mainnets
     POLYGON = "polygon"
-    POLYGON_MUMBAI = "polygon_mumbai"  # Testnet
     ETHEREUM = "ethereum"
-    ETHEREUM_SEPOLIA = "ethereum_sepolia"  # Testnet
     ARBITRUM = "arbitrum"
-    OPTIMISM = "optimism"
     BASE = "base"
+    # Testnets
+    POLYGON_AMOY = "polygon_amoy"  # Testnet (reemplazo de Mumbai)
+    ETHEREUM_SEPOLIA = "ethereum_sepolia"  # Testnet
+    # Legacy (deprecated, mantener para compatibilidad)
+    POLYGON_MUMBAI = "polygon_mumbai"  # Deprecated - usar POLYGON_AMOY
 
 
 class TokenType(str, enum.Enum):

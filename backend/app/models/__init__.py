@@ -20,6 +20,12 @@ from app.models.blockchain import (
     UserWallet, SmartContract, ProjectToken, TokenHolding,
     BlockchainTransaction, DividendDistribution, KYCBlockchainRecord
 )
+from app.models.compliance import (
+    KYCLevel, KYCStatus, DocumentType, DocumentStatus,
+    AlertType, AlertSeverity, AlertStatus, ReportType, RiskLevel,
+    KYCProfile, KYCDocument, AMLAlert, AMLRule,
+    RegulatoryReport, TransactionMonitor, SanctionsList, AssetValuation
+)
 
 __all__ = [
     # Core

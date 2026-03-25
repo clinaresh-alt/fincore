@@ -391,3 +391,199 @@ def get_config_value(db: Session, config_key: str) -> Optional[str]:
         SystemConfig.is_active == True
     ).first()
     return config.config_value if config else None
+
+
+def set_config_value(db: Session, config_key: str, value: str, user_id: UUID) -> None:
+    """Actualiza o crea un valor de configuracion."""
+    config = db.query(SystemConfig).filter(
+        SystemConfig.config_key == config_key
+    ).first()
+
+    if not config:
+        if config_key in SYSTEM_CONFIG_DEFINITIONS:
+            definition = SYSTEM_CONFIG_DEFINITIONS[config_key]
+            config = SystemConfig(
+                config_key=config_key,
+                category=definition["category"],
+                description=definition["description"],
+                is_encrypted=definition["is_encrypted"]
+            )
+            db.add(config)
+
+    if config:
+        config.config_value = value
+        config.updated_at = datetime.utcnow()
+        config.updated_by = user_id
+        config.is_active = True
+
+
+# === Blockchain Config Schemas ===
+class BlockchainConfigSchema(BaseModel):
+    """Configuracion de blockchain."""
+    walletConnectProjectId: str = ""
+    investmentContract: str = ""
+    kycContract: str = ""
+    dividendsContract: str = ""
+    tokenFactoryContract: str = ""
+    rpcUrls: Dict[str, str] = {}
+    explorerApiKeys: Dict[str, str] = {}
+    defaultNetwork: str = "polygon"
+    isTestnet: bool = False
+
+
+class SystemConfigSchema(BaseModel):
+    """Configuracion del sistema."""
+    appName: str = "FinCore"
+    appVersion: str = "1.0.0"
+    debugMode: bool = False
+    apiUrl: str = ""
+    apiTimeout: int = 30000
+    maxUploadSize: int = 10
+    sessionTimeout: int = 480
+    kycRequired: bool = True
+    minInvestment: int = 1000
+    maxInvestment: int = 1000000
+
+
+class FullConfigSchema(BaseModel):
+    """Configuracion completa del sistema."""
+    blockchain: BlockchainConfigSchema
+    system: SystemConfigSchema
+
+
+class FullConfigResponse(BaseModel):
+    """Respuesta con configuracion completa."""
+    blockchain: BlockchainConfigSchema
+    system: SystemConfigSchema
+    updated_at: Optional[str] = None
+
+
+# === Endpoints de Configuracion Completa ===
+@router.get("/config/system", response_model=FullConfigResponse)
+async def get_full_config(
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+) -> FullConfigResponse:
+    """
+    Obtiene la configuracion completa de blockchain y sistema.
+    """
+    # Obtener todas las configuraciones de blockchain
+    blockchain_config = BlockchainConfigSchema(
+        walletConnectProjectId=get_config_value(db, "blockchain_walletconnect_project_id") or "",
+        investmentContract=get_config_value(db, "blockchain_investment_contract") or "",
+        kycContract=get_config_value(db, "blockchain_kyc_contract") or "",
+        dividendsContract=get_config_value(db, "blockchain_dividends_contract") or "",
+        tokenFactoryContract=get_config_value(db, "blockchain_token_factory_contract") or "",
+        rpcUrls={
+            "polygon": get_config_value(db, "blockchain_rpc_polygon") or "https://polygon-rpc.com",
+            "ethereum": get_config_value(db, "blockchain_rpc_ethereum") or "https://eth.llamarpc.com",
+            "arbitrum": get_config_value(db, "blockchain_rpc_arbitrum") or "https://arb1.arbitrum.io/rpc",
+            "base": get_config_value(db, "blockchain_rpc_base") or "https://mainnet.base.org",
+            "polygonAmoy": get_config_value(db, "blockchain_rpc_polygon_amoy") or "https://rpc-amoy.polygon.technology",
+            "sepolia": get_config_value(db, "blockchain_rpc_sepolia") or "https://rpc.sepolia.org",
+        },
+        explorerApiKeys={
+            "polygonscan": get_config_value(db, "blockchain_api_polygonscan") or "",
+            "etherscan": get_config_value(db, "blockchain_api_etherscan") or "",
+            "arbiscan": get_config_value(db, "blockchain_api_arbiscan") or "",
+            "basescan": get_config_value(db, "blockchain_api_basescan") or "",
+        },
+        defaultNetwork=get_config_value(db, "blockchain_default_network") or "polygon",
+        isTestnet=get_config_value(db, "blockchain_is_testnet") == "true"
+    )
+
+    # Obtener todas las configuraciones del sistema
+    system_config = SystemConfigSchema(
+        appName=get_config_value(db, "system_app_name") or "FinCore",
+        appVersion=get_config_value(db, "system_app_version") or "1.0.0",
+        debugMode=get_config_value(db, "system_debug_mode") == "true",
+        apiUrl=get_config_value(db, "system_api_url") or "",
+        apiTimeout=int(get_config_value(db, "system_api_timeout") or "30000"),
+        maxUploadSize=int(get_config_value(db, "system_max_upload_size") or "10"),
+        sessionTimeout=int(get_config_value(db, "system_session_timeout") or "480"),
+        kycRequired=get_config_value(db, "system_kyc_required") != "false",
+        minInvestment=int(get_config_value(db, "system_min_investment") or "1000"),
+        maxInvestment=int(get_config_value(db, "system_max_investment") or "1000000")
+    )
+
+    # Obtener ultima actualizacion
+    last_updated = db.query(SystemConfig.updated_at).order_by(
+        SystemConfig.updated_at.desc()
+    ).first()
+
+    return FullConfigResponse(
+        blockchain=blockchain_config,
+        system=system_config,
+        updated_at=last_updated[0].isoformat() if last_updated and last_updated[0] else None
+    )
+
+
+@router.put("/config/system")
+async def update_full_config(
+    data: FullConfigSchema,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Actualiza la configuracion completa de blockchain y sistema.
+    """
+    try:
+        # Actualizar configuracion de blockchain
+        set_config_value(db, "blockchain_walletconnect_project_id", data.blockchain.walletConnectProjectId, current_user.id)
+        set_config_value(db, "blockchain_investment_contract", data.blockchain.investmentContract, current_user.id)
+        set_config_value(db, "blockchain_kyc_contract", data.blockchain.kycContract, current_user.id)
+        set_config_value(db, "blockchain_dividends_contract", data.blockchain.dividendsContract, current_user.id)
+        set_config_value(db, "blockchain_token_factory_contract", data.blockchain.tokenFactoryContract, current_user.id)
+        set_config_value(db, "blockchain_default_network", data.blockchain.defaultNetwork, current_user.id)
+        set_config_value(db, "blockchain_is_testnet", str(data.blockchain.isTestnet).lower(), current_user.id)
+
+        # RPC URLs
+        if data.blockchain.rpcUrls:
+            set_config_value(db, "blockchain_rpc_polygon", data.blockchain.rpcUrls.get("polygon", ""), current_user.id)
+            set_config_value(db, "blockchain_rpc_ethereum", data.blockchain.rpcUrls.get("ethereum", ""), current_user.id)
+            set_config_value(db, "blockchain_rpc_arbitrum", data.blockchain.rpcUrls.get("arbitrum", ""), current_user.id)
+            set_config_value(db, "blockchain_rpc_base", data.blockchain.rpcUrls.get("base", ""), current_user.id)
+            set_config_value(db, "blockchain_rpc_polygon_amoy", data.blockchain.rpcUrls.get("polygonAmoy", ""), current_user.id)
+            set_config_value(db, "blockchain_rpc_sepolia", data.blockchain.rpcUrls.get("sepolia", ""), current_user.id)
+
+        # Explorer API Keys
+        if data.blockchain.explorerApiKeys:
+            set_config_value(db, "blockchain_api_polygonscan", data.blockchain.explorerApiKeys.get("polygonscan", ""), current_user.id)
+            set_config_value(db, "blockchain_api_etherscan", data.blockchain.explorerApiKeys.get("etherscan", ""), current_user.id)
+            set_config_value(db, "blockchain_api_arbiscan", data.blockchain.explorerApiKeys.get("arbiscan", ""), current_user.id)
+            set_config_value(db, "blockchain_api_basescan", data.blockchain.explorerApiKeys.get("basescan", ""), current_user.id)
+
+        # Actualizar configuracion del sistema
+        set_config_value(db, "system_app_name", data.system.appName, current_user.id)
+        set_config_value(db, "system_app_version", data.system.appVersion, current_user.id)
+        set_config_value(db, "system_debug_mode", str(data.system.debugMode).lower(), current_user.id)
+        set_config_value(db, "system_api_timeout", str(data.system.apiTimeout), current_user.id)
+        set_config_value(db, "system_max_upload_size", str(data.system.maxUploadSize), current_user.id)
+        set_config_value(db, "system_session_timeout", str(data.system.sessionTimeout), current_user.id)
+        set_config_value(db, "system_kyc_required", str(data.system.kycRequired).lower(), current_user.id)
+        set_config_value(db, "system_min_investment", str(data.system.minInvestment), current_user.id)
+        set_config_value(db, "system_max_investment", str(data.system.maxInvestment), current_user.id)
+
+        # Audit log
+        audit = AuditLog(
+            user_id=current_user.id,
+            action=AuditAction.CONFIG_CHANGED,
+            resource_type="SystemConfig",
+            description="Configuracion de sistema actualizada (blockchain y sistema)"
+        )
+        db.add(audit)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "Configuracion actualizada correctamente",
+            "updated_at": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error actualizando configuracion: {str(e)}"
+        )
