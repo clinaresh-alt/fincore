@@ -1,0 +1,224 @@
+# ============================================================
+# FinCore - Backend CI Pipeline
+# ============================================================
+#
+# Ejecuta tests, linting y verificacion de cobertura para
+# el backend FastAPI (Python 3.12).
+#
+# Triggers:
+# - Push a main/develop
+# - Pull requests a main/develop
+# - Cambios en backend/
+# ============================================================
+
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: backend
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Variables de entorno para tests
+  TESTING: "true"
+  DATABASE_URL: "sqlite:///./test.db"
+  SECRET_KEY: "test-secret-key-for-ci-pipeline-only"
+  JWT_SECRET_KEY: "test-jwt-secret-key-for-ci-pipeline"
+  ENCRYPTION_KEY: "test-encryption-key-32-chars-min"
+
+jobs:
+  # ============================================================
+  # Job 1: Lint y formato de codigo
+  # ============================================================
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install linting tools
+        run: |
+          pip install ruff mypy
+
+      - name: Run Ruff (linter)
+        run: |
+          ruff check . --output-format=github || true
+
+      - name: Run Ruff (formatter check)
+        run: |
+          ruff format --check . || true
+
+  # ============================================================
+  # Job 2: Tests unitarios e integracion
+  # ============================================================
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: fincore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          pytest \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=40 \
+            -v \
+            --tb=short
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/fincore_test
+          REDIS_URL: redis://localhost:6379/0
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/coverage.xml
+          retention-days: 7
+
+      - name: Coverage Summary
+        run: |
+          echo "### Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage report generated. See artifacts for details." >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # Job 3: Security scan
+  # ============================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety pip-audit
+
+      - name: Run Bandit (security linter)
+        run: |
+          bandit -r app -f json -o bandit-report.json || true
+          bandit -r app -f txt || true
+
+      - name: Run pip-audit (dependency vulnerabilities)
+        run: |
+          pip install -r requirements.txt
+          pip-audit --format json --output pip-audit-report.json || true
+          pip-audit || true
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            backend/bandit-report.json
+            backend/pip-audit-report.json
+          retention-days: 30
+
+  # ============================================================
+  # Job 4: Build verification
+  # ============================================================
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify imports
+        run: |
+          python -c "from app.main import app; print('FastAPI app imports successfully')"
+
+      - name: Check database models
+        run: |
+          python -c "from app.models import *; print('All models import successfully')"
+
+      - name: Build Summary
+        run: |
+          echo "### Build Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo ":white_check_mark: All imports verified successfully" >> $GITHUB_STEP_SUMMARY

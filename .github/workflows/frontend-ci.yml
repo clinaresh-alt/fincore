@@ -1,0 +1,215 @@
+# ============================================================
+# FinCore - Frontend CI Pipeline
+# ============================================================
+#
+# Ejecuta tests, linting, type-checking y build para
+# el frontend Next.js (React + TypeScript).
+#
+# Triggers:
+# - Push a main/develop
+# - Pull requests a main/develop
+# - Cambios en frontend/
+# ============================================================
+
+name: Frontend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'frontend/**'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: frontend
+
+env:
+  NODE_VERSION: "20"
+  # Variables de entorno para build
+  NEXT_PUBLIC_API_URL: "http://localhost:8000"
+  NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: "test-project-id"
+
+jobs:
+  # ============================================================
+  # Job 1: Lint y type-check
+  # ============================================================
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint || true
+
+      - name: Run TypeScript check
+        run: npx tsc --noEmit || true
+
+  # ============================================================
+  # Job 2: Tests unitarios
+  # ============================================================
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --reporter=verbose
+
+      - name: Run tests with coverage
+        run: npm test -- --coverage --reporter=verbose || true
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 7
+
+      - name: Test Summary
+        run: |
+          echo "### Frontend Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tests executed successfully. See artifacts for coverage." >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # Job 3: Build production
+  # ============================================================
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build
+          path: |
+            frontend/.next/
+            frontend/out/
+          retention-days: 7
+
+      - name: Build Summary
+        run: |
+          echo "### Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo ":white_check_mark: Production build completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d ".next" ]; then
+            echo "Build size: $(du -sh .next | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================
+  # Job 4: Security audit
+  # ============================================================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: |
+          npm audit --json > npm-audit-report.json || true
+          npm audit || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report
+          path: frontend/npm-audit-report.json
+          retention-days: 30
+
+  # ============================================================
+  # Job 5: Bundle analysis (opcional)
+  # ============================================================
+  bundle-analysis:
+    name: Bundle Analysis
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Analyze bundle
+        run: |
+          npx @next/bundle-analyzer || true
+        env:
+          ANALYZE: true
+          NEXT_TELEMETRY_DISABLED: 1
