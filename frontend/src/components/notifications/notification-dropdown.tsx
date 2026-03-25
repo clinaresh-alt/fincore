@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -178,16 +178,32 @@ export function NotificationDropdown() {
 
   const { isAuthenticated } = useAuthStore();
   const [isOpen, setIsOpen] = useState(false);
+  const isMountedRef = useRef(true);
+  const cleanupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Conectar WebSocket cuando esta autenticado
   useEffect(() => {
+    isMountedRef.current = true;
+
+    // Cancelar cualquier desconexion pendiente (por StrictMode remount)
+    if (cleanupTimeoutRef.current) {
+      clearTimeout(cleanupTimeoutRef.current);
+      cleanupTimeoutRef.current = null;
+    }
+
     const token = getToken();
     if (isAuthenticated && token) {
       connect(token);
     }
 
     return () => {
-      disconnect();
+      isMountedRef.current = false;
+      // Delay para permitir que StrictMode vuelva a montar antes de desconectar
+      cleanupTimeoutRef.current = setTimeout(() => {
+        if (!isMountedRef.current) {
+          disconnect();
+        }
+      }, 100);
     };
   }, [isAuthenticated, connect, disconnect]);
 

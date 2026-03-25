@@ -26,6 +26,9 @@ from app.models.compliance import (
     KYCProfile, KYCDocument, AMLAlert, AMLRule,
     RegulatoryReport, TransactionMonitor, SanctionsList, AssetValuation
 )
+from app.models.notification import (
+    Notification, NotificationPreference, NotificationType, NotificationPriority
+)
 
 __all__ = [
     # Core
@@ -73,4 +76,9 @@ __all__ = [
     "BlockchainTransaction",
     "DividendDistribution",
     "KYCBlockchainRecord",
+    # Notifications
+    "Notification",
+    "NotificationPreference",
+    "NotificationType",
+    "NotificationPriority",
 ]

@@ -31,8 +31,12 @@ async def lifespan(app: FastAPI):
 
     # Crear tablas si no existen (en desarrollo)
     if settings.DEBUG:
-        logger.info("Creando tablas de base de datos...")
-        Base.metadata.create_all(bind=engine)
+        try:
+            logger.info("Verificando tablas de base de datos...")
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            logger.warning(f"No se pudieron crear tablas automaticamente: {e}")
+            logger.info("Las tablas probablemente ya existen. Continuando...")
 
     logger.info(f"FinCore {settings.APP_VERSION} iniciado correctamente")
 

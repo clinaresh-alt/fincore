@@ -86,11 +86,15 @@ interface NotificationStore {
   setPreference: (key: keyof NotificationStore["preferences"], value: boolean) => void;
 }
 
+// URL base del API
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
 // URL del WebSocket
 const getWsUrl = (token: string) => {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const wsProtocol = baseUrl.startsWith("https") ? "wss" : "ws";
-  const wsHost = baseUrl.replace(/^https?:\/\//, "");
+  const wsProtocol = API_BASE_URL.startsWith("https") ? "wss" : "ws";
+  // Extraer solo host:puerto sin path (baseUrl puede incluir /api/v1)
+  const urlMatch = API_BASE_URL.match(/^https?:\/\/([^/]+)/);
+  const wsHost = urlMatch ? urlMatch[1] : "localhost:8000";
   return `${wsProtocol}://${wsHost}/api/v1/notifications/ws?token=${token}`;
 };
 
@@ -128,6 +132,7 @@ const showDesktopNotification = (title: string, body: string) => {
 let reconnectAttempts = 0;
 let reconnectTimeout: NodeJS.Timeout | null = null;
 let storedToken: string | null = null;
+let connectionId = 0; // Para evitar race conditions con StrictMode
 
 export const useNotificationStore = create<NotificationStore>()(
   persist(
@@ -153,11 +158,20 @@ export const useNotificationStore = create<NotificationStore>()(
         if (isConnecting) return;
 
         storedToken = token;
+        connectionId++; // Incrementar para invalidar conexiones anteriores
+        const currentConnectionId = connectionId;
+
         set({ isConnecting: true, connectionError: null });
 
         const websocket = new WebSocket(getWsUrl(token));
 
         websocket.onopen = () => {
+          // Verificar que esta conexion sigue siendo valida
+          if (currentConnectionId !== connectionId) {
+            websocket.close(1000, "Conexion obsoleta");
+            return;
+          }
+
           console.log("[WS] Conectado");
           reconnectAttempts = 0;
           set({
@@ -173,6 +187,9 @@ export const useNotificationStore = create<NotificationStore>()(
         };
 
         websocket.onmessage = (event) => {
+          // Ignorar mensajes de conexiones obsoletas
+          if (currentConnectionId !== connectionId) return;
+
           try {
             const message = JSON.parse(event.data) as WebSocketMessage;
 
@@ -194,23 +211,29 @@ export const useNotificationStore = create<NotificationStore>()(
         };
 
         websocket.onerror = (error) => {
+          // Ignorar errores de conexiones obsoletas
+          if (currentConnectionId !== connectionId) return;
+
           console.error("[WS] Error:", error);
           set({ connectionError: "Error de conexion WebSocket" });
         };
 
         websocket.onclose = (event) => {
+          // Ignorar eventos de conexiones obsoletas
+          if (currentConnectionId !== connectionId) return;
+
           console.log("[WS] Desconectado:", event.code, event.reason);
           set({ ws: null, isConnected: false, isConnecting: false });
 
-          // Reconexion automatica
-          if (event.code !== 1000 && storedToken) {
+          // Reconexion automatica (no reconectar si fue cierre limpio o sin token)
+          if (event.code !== 1000 && storedToken && currentConnectionId === connectionId) {
             reconnectAttempts++;
             const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
 
             console.log(`[WS] Reconectando en ${delay}ms (intento ${reconnectAttempts})`);
 
             reconnectTimeout = setTimeout(() => {
-              if (storedToken) {
+              if (storedToken && currentConnectionId === connectionId) {
                 get().connect(storedToken);
               }
             }, delay);
@@ -224,14 +247,20 @@ export const useNotificationStore = create<NotificationStore>()(
       disconnect: () => {
         const { ws } = get();
         storedToken = null;
+        connectionId++; // Invalidar cualquier conexion en progreso
 
         if (reconnectTimeout) {
           clearTimeout(reconnectTimeout);
           reconnectTimeout = null;
         }
 
-        if (ws) {
-          ws.close(1000, "Usuario desconectado");
+        // Solo cerrar si esta abierto (no si esta conectando para evitar errores)
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.close(1000, "Usuario desconectado");
+          } catch {
+            // Ignorar errores al cerrar
+          }
         }
 
         set({ ws: null, isConnected: false, isConnecting: false });
@@ -279,9 +308,13 @@ export const useNotificationStore = create<NotificationStore>()(
 
         // Sync con backend
         try {
-          await fetch("/api/v1/notifications/mark-read", {
+          const token = getStoredToken();
+          await fetch(`${API_BASE_URL}/notifications/mark-read`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(token && { Authorization: `Bearer ${token}` }),
+            },
             body: JSON.stringify({ notification_ids: [id] }),
           });
         } catch {
@@ -301,9 +334,13 @@ export const useNotificationStore = create<NotificationStore>()(
         }));
 
         try {
-          await fetch("/api/v1/notifications/mark-read", {
+          const token = getStoredToken();
+          await fetch(`${API_BASE_URL}/notifications/mark-read`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              ...(token && { Authorization: `Bearer ${token}` }),
+            },
             body: JSON.stringify({ mark_all: true }),
           });
         } catch {
@@ -323,7 +360,11 @@ export const useNotificationStore = create<NotificationStore>()(
         }));
 
         try {
-          await fetch(`/api/v1/notifications/${id}`, { method: "DELETE" });
+          const token = getStoredToken();
+          await fetch(`${API_BASE_URL}/notifications/${id}`, {
+            method: "DELETE",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
         } catch {
           // Ignorar errores
         }
@@ -337,7 +378,11 @@ export const useNotificationStore = create<NotificationStore>()(
       // Fetch de notificaciones del backend
       fetchNotifications: async () => {
         try {
-          const response = await fetch("/api/v1/notifications?limit=50");
+          const token = getStoredToken();
+          const headers: HeadersInit = token
+            ? { Authorization: `Bearer ${token}` }
+            : {};
+          const response = await fetch(`${API_BASE_URL}/notifications?limit=50`, { headers });
           if (response.ok) {
             const data = await response.json();
             set({
@@ -353,7 +398,11 @@ export const useNotificationStore = create<NotificationStore>()(
       // Fetch solo del conteo
       fetchUnreadCount: async () => {
         try {
-          const response = await fetch("/api/v1/notifications/unread-count");
+          const token = getStoredToken();
+          const headers: HeadersInit = token
+            ? { Authorization: `Bearer ${token}` }
+            : {};
+          const response = await fetch(`${API_BASE_URL}/notifications/unread-count`, { headers });
           if (response.ok) {
             const data = await response.json();
             set({ unreadCount: data.unread_count });

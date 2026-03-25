@@ -196,7 +196,7 @@ export default function BlockchainPage() {
       const signature = await signMessageAsync({ message });
 
       // Registrar en backend
-      await blockchainAPI.createWallet({
+      const walletResponse = await blockchainAPI.createWallet({
         address,
         network: CHAIN_TO_NETWORK[chainId] || "polygon",
         label: "Mi Wallet Principal",
@@ -204,7 +204,7 @@ export default function BlockchainPage() {
 
       // Verificar con firma
       await blockchainAPI.verifyWallet({
-        address,
+        wallet_id: walletResponse.id,
         signature,
         message,
       });
@@ -300,13 +300,27 @@ export default function BlockchainPage() {
   }, [isApprovalConfirmed]);
 
   const completePurchase = async () => {
-    if (!selectedToken || !purchaseAmount) return;
+    if (!selectedToken || !purchaseAmount || !address) return;
+
+    // Obtener la wallet vinculada actual
+    const currentWallet = wallets.find(
+      (w) => w.address.toLowerCase() === address.toLowerCase()
+    );
+    if (!currentWallet) {
+      toast({
+        title: "Error",
+        description: "Debes vincular tu wallet antes de comprar tokens",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
       // Llamar al backend para registrar la compra
       await blockchainAPI.purchaseTokens({
         token_id: selectedToken.id,
         cantidad: parseFloat(purchaseAmount),
+        wallet_id: currentWallet.id,
       });
 
       toast({

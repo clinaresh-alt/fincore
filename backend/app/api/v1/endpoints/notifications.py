@@ -7,7 +7,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import decode_token
@@ -85,7 +85,7 @@ class WebSocketStats(BaseModel):
     user_connected: bool
 
 
-# WebSocket endpoint
+# WebSocket endpoint (permanece async)
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -148,14 +148,14 @@ async def websocket_endpoint(
             await manager.remove_from_group(user_id, "admins")
 
 
-# REST endpoints
-@router.get("/notifications", response_model=NotificationListResponse)
-async def get_notifications(
+# REST endpoints (sync)
+@router.get("", response_model=NotificationListResponse)
+def get_notifications(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     unread_only: bool = Query(False),
     notification_type: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -171,7 +171,7 @@ async def get_notifications(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Tipo de notificacion invalido: {notification_type}")
 
-    notifications = await service.get_user_notifications(
+    notifications = service.get_user_notifications(
         user_id=current_user.id,
         limit=limit + 1,  # +1 para saber si hay mas
         offset=offset,
@@ -179,7 +179,7 @@ async def get_notifications(
         notification_type=notif_type
     )
 
-    unread_count = await service.get_unread_count(current_user.id)
+    unread_count = service.get_unread_count(current_user.id)
 
     has_more = len(notifications) > limit
     if has_more:
@@ -205,21 +205,21 @@ async def get_notifications(
     )
 
 
-@router.get("/notifications/unread-count")
-async def get_unread_count(
-    db: AsyncSession = Depends(get_db),
+@router.get("/unread-count")
+def get_unread_count(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Obtiene el conteo de notificaciones no leidas."""
     service = NotificationService(db)
-    count = await service.get_unread_count(current_user.id)
+    count = service.get_unread_count(current_user.id)
     return {"unread_count": count}
 
 
-@router.post("/notifications/mark-read")
-async def mark_notifications_read(
+@router.post("/mark-read")
+def mark_notifications_read(
     request: MarkReadRequest,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -229,7 +229,7 @@ async def mark_notifications_read(
     service = NotificationService(db)
 
     if request.mark_all:
-        count = await service.mark_all_as_read(current_user.id)
+        count = service.mark_all_as_read(current_user.id)
         return {"marked_count": count}
 
     if not request.notification_ids:
@@ -238,7 +238,7 @@ async def mark_notifications_read(
     marked_count = 0
     for notif_id in request.notification_ids:
         try:
-            if await service.mark_as_read(UUID(notif_id), current_user.id):
+            if service.mark_as_read(UUID(notif_id), current_user.id):
                 marked_count += 1
         except ValueError:
             continue
@@ -246,17 +246,17 @@ async def mark_notifications_read(
     return {"marked_count": marked_count}
 
 
-@router.delete("/notifications/{notification_id}")
-async def delete_notification(
+@router.delete("/{notification_id}")
+def delete_notification(
     notification_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Elimina una notificacion."""
     service = NotificationService(db)
 
     try:
-        deleted = await service.delete_notification(UUID(notification_id), current_user.id)
+        deleted = service.delete_notification(UUID(notification_id), current_user.id)
     except ValueError:
         raise HTTPException(status_code=400, detail="ID de notificacion invalido")
 
@@ -266,14 +266,14 @@ async def delete_notification(
     return {"deleted": True}
 
 
-@router.get("/notifications/preferences", response_model=NotificationPreferencesResponse)
-async def get_notification_preferences(
-    db: AsyncSession = Depends(get_db),
+@router.get("/preferences", response_model=NotificationPreferencesResponse)
+def get_notification_preferences(
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Obtiene las preferencias de notificacion del usuario."""
     service = NotificationService(db)
-    prefs = await service.get_user_preferences(current_user.id)
+    prefs = service.get_user_preferences(current_user.id)
 
     if not prefs:
         # Retornar valores por defecto
@@ -302,24 +302,24 @@ async def get_notification_preferences(
     )
 
 
-@router.put("/notifications/preferences", response_model=NotificationPreferencesResponse)
-async def update_notification_preferences(
+@router.put("/preferences", response_model=NotificationPreferencesResponse)
+def update_notification_preferences(
     request: NotificationPreferencesRequest,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Actualiza las preferencias de notificacion."""
     service = NotificationService(db)
 
     # Convertir min_priority si se proporciona
-    update_data = request.dict(exclude_none=True)
+    update_data = request.model_dump(exclude_none=True)
     if "min_priority" in update_data:
         try:
             update_data["min_priority"] = NotificationPriority(update_data["min_priority"])
         except ValueError:
             raise HTTPException(status_code=400, detail="Prioridad invalida")
 
-    prefs = await service.update_user_preferences(current_user.id, **update_data)
+    prefs = service.update_user_preferences(current_user.id, **update_data)
 
     return NotificationPreferencesResponse(
         audit_notifications=prefs.audit_notifications,
@@ -335,8 +335,8 @@ async def update_notification_preferences(
     )
 
 
-@router.get("/notifications/ws-stats", response_model=WebSocketStats)
-async def get_websocket_stats(
+@router.get("/ws-stats", response_model=WebSocketStats)
+def get_websocket_stats(
     current_user: User = Depends(get_current_user)
 ):
     """Obtiene estadisticas de conexiones WebSocket."""
@@ -348,12 +348,12 @@ async def get_websocket_stats(
 
 
 # Endpoint para testing/admin - enviar notificacion
-@router.post("/notifications/test", include_in_schema=False)
-async def send_test_notification(
+@router.post("/test", include_in_schema=False)
+def send_test_notification(
     title: str = Query(...),
     message: str = Query(...),
     priority: str = Query("medium"),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -370,7 +370,7 @@ async def send_test_notification(
     except ValueError:
         prio = NotificationPriority.MEDIUM
 
-    notification = await service.create_notification(
+    notification = service.create_notification(
         user_id=current_user.id,
         notification_type=NotificationType.INFO,
         title=title,

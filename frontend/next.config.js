@@ -11,7 +11,7 @@ const nextConfig = {
     ];
   },
   // Webpack config para resolver modulos de wallet connectors
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve.fallback = {
       ...config.resolve.fallback,
       fs: false,
@@ -19,17 +19,18 @@ const nextConfig = {
       tls: false,
       crypto: false,
     };
-    config.externals.push(
-      "pino-pretty",
-      "lokijs",
-      "encoding",
-      "@react-native-async-storage/async-storage"
-    );
-    // Ignorar modulos de React Native que no son necesarios en web
+
+    // Externals que no contienen @ (estos funcionan con push)
+    config.externals.push("pino-pretty", "lokijs", "encoding");
+
+    // Para modulos con @ en el nombre, usar resolve.alias con un modulo vacio
     config.resolve.alias = {
       ...config.resolve.alias,
-      "@react-native-async-storage/async-storage": false,
+      "@react-native-async-storage/async-storage": require.resolve(
+        "./src/lib/empty-module.js"
+      ),
     };
+
     return config;
   },
 };
