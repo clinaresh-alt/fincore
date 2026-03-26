@@ -708,4 +708,113 @@ export const auditAPI = {
   },
 };
 
+// === REMITTANCES API ===
+export const remittancesAPI = {
+  // Quote
+  getQuote: async (data: {
+    amount_source: number;
+    currency_source: string;
+    currency_destination: string;
+    stablecoin?: string;
+  }) => {
+    const response = await apiClient.post("/remittances/quote", data);
+    return response.data;
+  },
+
+  // Create remittance
+  create: async (data: {
+    amount_fiat_source: number;
+    currency_source: string;
+    currency_destination: string;
+    recipient_info: {
+      full_name: string;
+      email?: string;
+      phone?: string;
+      country: string;
+      bank_name?: string;
+      bank_account?: string;
+      clabe?: string;
+      routing_number?: string;
+      swift_code?: string;
+    };
+    payment_method?: string;
+    disbursement_method?: string;
+    stablecoin?: string;
+    notes?: string;
+  }) => {
+    const response = await apiClient.post("/remittances", data);
+    return response.data;
+  },
+
+  // List remittances
+  list: async (params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const response = await apiClient.get("/remittances", { params });
+    return response.data;
+  },
+
+  // Get by ID
+  get: async (id: string) => {
+    const response = await apiClient.get(`/remittances/${id}`);
+    return response.data;
+  },
+
+  // Get by reference code
+  getByReference: async (referenceCode: string) => {
+    const response = await apiClient.get(`/remittances/reference/${referenceCode}`);
+    return response.data;
+  },
+
+  // Lock funds in escrow
+  lockFunds: async (remittanceId: string) => {
+    const response = await apiClient.post(`/remittances/${remittanceId}/lock`);
+    return response.data;
+  },
+
+  // Cancel remittance
+  cancel: async (remittanceId: string, reason?: string) => {
+    const response = await apiClient.post(`/remittances/${remittanceId}/cancel`, {
+      reason,
+    });
+    return response.data;
+  },
+
+  // Release funds (operator/admin only)
+  releaseFunds: async (remittanceId: string, disbursementReference?: string) => {
+    const response = await apiClient.post(`/remittances/${remittanceId}/release`, {
+      disbursement_reference: disbursementReference,
+    });
+    return response.data;
+  },
+
+  // Get pending refunds (admin only)
+  getPendingRefunds: async () => {
+    const response = await apiClient.get("/remittances/pending-refunds");
+    return response.data;
+  },
+
+  // Process refund (admin only)
+  processRefund: async (remittanceId: string) => {
+    const response = await apiClient.post(`/remittances/${remittanceId}/refund`);
+    return response.data;
+  },
+
+  // Get limits for corridor
+  getLimits: async (corridorSource: string, corridorDestination: string) => {
+    const response = await apiClient.get("/remittances/limits", {
+      params: { corridor_source: corridorSource, corridor_destination: corridorDestination },
+    });
+    return response.data;
+  },
+
+  // Get blockchain transactions for remittance
+  getTransactions: async (remittanceId: string) => {
+    const response = await apiClient.get(`/remittances/${remittanceId}/transactions`);
+    return response.data;
+  },
+};
+
 export default apiClient;

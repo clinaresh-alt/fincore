@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Rocket,
   BarChart3,
+  Send,
 } from "lucide-react";
 import { useAuthStore } from "@/store/auth-store";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,12 @@ const navigation = [
     href: "/blockchain",
     icon: Coins,
     roles: ["Inversionista", "Admin"],
+  },
+  {
+    name: "Remesas",
+    href: "/remittances",
+    icon: Send,
+    roles: ["Cliente", "Inversionista", "Admin"],
   },
   {
     name: "Auditoria SC",

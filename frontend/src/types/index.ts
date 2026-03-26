@@ -432,3 +432,127 @@ export interface SecurityDashboard {
     timestamp: string;
   }>;
 }
+
+// === REMITTANCES ===
+export type RemittanceStatus =
+  | "initiated"
+  | "pending_deposit"
+  | "deposited"
+  | "locked"
+  | "processing"
+  | "disbursed"
+  | "completed"
+  | "refund_pending"
+  | "refunded"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export type PaymentMethod =
+  | "spei"
+  | "wire_transfer"
+  | "card"
+  | "cash"
+  | "crypto";
+
+export type DisbursementMethod =
+  | "bank_transfer"
+  | "mobile_wallet"
+  | "cash_pickup"
+  | "home_delivery";
+
+export type RemittanceCurrency =
+  | "USD"
+  | "MXN"
+  | "EUR"
+  | "CLP"
+  | "COP"
+  | "PEN"
+  | "BRL"
+  | "ARS";
+
+export type Stablecoin = "USDC" | "USDT" | "DAI";
+
+export interface RecipientInfo {
+  full_name: string;
+  email?: string;
+  phone?: string;
+  country: string;
+  bank_name?: string;
+  bank_account?: string;
+  clabe?: string;
+  routing_number?: string;
+  swift_code?: string;
+}
+
+export interface Remittance {
+  id: string;
+  reference_code: string;
+  sender_id: string;
+  recipient_info: RecipientInfo;
+  amount_fiat_source: number;
+  currency_source: RemittanceCurrency;
+  amount_fiat_destination?: number;
+  currency_destination: RemittanceCurrency;
+  amount_stablecoin?: number;
+  stablecoin: Stablecoin;
+  exchange_rate_source_usd?: number;
+  exchange_rate_usd_destination?: number;
+  exchange_rate_locked_at?: string;
+  platform_fee: number;
+  network_fee: number;
+  total_fees: number;
+  status: RemittanceStatus;
+  payment_method?: PaymentMethod;
+  disbursement_method?: DisbursementMethod;
+  escrow_locked_at?: string;
+  escrow_expires_at?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  notes?: string;
+}
+
+export interface RemittanceQuote {
+  amount_source: number;
+  currency_source: RemittanceCurrency;
+  amount_destination: number;
+  currency_destination: RemittanceCurrency;
+  amount_stablecoin: number;
+  stablecoin: Stablecoin;
+  exchange_rate_source_usd: number;
+  exchange_rate_usd_destination: number;
+  platform_fee: number;
+  network_fee_estimate: number;
+  total_fees: number;
+  total_to_pay: number;
+  recipient_receives: number;
+  quote_valid_until: string;
+}
+
+export interface RemittanceBlockchainTx {
+  id: string;
+  remittance_id: string;
+  tx_hash?: string;
+  operation: string;
+  blockchain_status: "pending" | "submitted" | "mined" | "confirmed" | "reverted" | "replaced";
+  network: string;
+  contract_address?: string;
+  from_address?: string;
+  to_address?: string;
+  gas_used?: number;
+  confirmations: number;
+  error_message?: string;
+  created_at: string;
+  confirmed_at?: string;
+}
+
+export interface RemittanceLimit {
+  corridor_source: RemittanceCurrency;
+  corridor_destination: RemittanceCurrency;
+  kyc_level: number;
+  min_amount_usd: number;
+  max_amount_usd: number;
+  daily_limit_usd: number;
+  monthly_limit_usd: number;
+}

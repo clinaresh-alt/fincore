@@ -268,3 +268,56 @@ def assert_decimal_equal():
     def _assert(a: Decimal, b: Decimal, tolerance: Decimal = Decimal("0.0001")):
         assert abs(a - b) < tolerance, f"{a} != {b} (tolerance: {tolerance})"
     return _assert
+
+
+# ==================== REMITTANCE FIXTURES ====================
+
+@pytest.fixture
+def sample_recipient_info():
+    """Informacion de beneficiario de ejemplo."""
+    return {
+        "name": "Juan Perez Garcia",
+        "bank_name": "Banco de Chile",
+        "account_number": "1234567890",
+        "account_type": "checking",
+        "phone": "+56912345678",
+        "email": "juan.perez@email.com",
+        "address": "Av. Providencia 123",
+        "city": "Santiago",
+        "country": "CL"
+    }
+
+
+@pytest.fixture
+def sample_remittance_data():
+    """Datos de remesa de ejemplo."""
+    return {
+        "id": str(uuid4()),
+        "reference_code": "REM-20240115-ABC123",
+        "sender_id": str(uuid4()),
+        "amount_fiat_source": Decimal("500.00"),
+        "currency_source": "USD",
+        "amount_fiat_destination": Decimal("450000.00"),
+        "currency_destination": "CLP",
+        "amount_stablecoin": Decimal("492.50"),
+        "stablecoin": "USDC",
+        "exchange_rate_source_usd": Decimal("1.0"),
+        "platform_fee": Decimal("7.50"),
+        "network_fee": Decimal("0.50"),
+        "total_fees": Decimal("8.00"),
+        "status": "initiated",
+        "payment_method": "wire_transfer",
+        "disbursement_method": "bank_transfer"
+    }
+
+
+@pytest.fixture
+def sample_escrow_wallet():
+    """Wallet de escrow de ejemplo."""
+    return "0x742d35Cc6634C0532925a3b844Bc9e7595f8bF16"
+
+
+@pytest.fixture
+def sample_escrow_contract():
+    """Direccion de contrato de escrow."""
+    return "0x1234567890123456789012345678901234567890"

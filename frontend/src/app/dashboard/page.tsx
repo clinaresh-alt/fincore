@@ -8,8 +8,8 @@ import { formatCurrency, formatPercentage, getProjectStatusColor } from "@/lib/u
 import { KPICard } from "@/components/ui/kpi-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PortfolioChart } from "@/components/charts/portfolio-chart";
-import { CashFlowChart } from "@/components/charts/cashflow-chart";
+// OPTIMIZADO: Lazy loading de charts para mejor rendimiento
+import { PortfolioChart, CashFlowChart } from "@/components/charts";
 import {
   Wallet,
   TrendingUp,

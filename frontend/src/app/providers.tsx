@@ -12,8 +12,8 @@ const Web3Provider = dynamic(
   }
 );
 
-// Rutas que necesitan Web3
-const WEB3_ROUTES = ["/blockchain", "/investments", "/dashboard"];
+// Rutas que necesitan Web3 (OPTIMIZADO: dashboard removido para reducir carga inicial)
+const WEB3_ROUTES = ["/blockchain", "/investments", "/remittances"];
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

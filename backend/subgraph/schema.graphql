@@ -1,0 +1,267 @@
+# FinCore Remittance Subgraph Schema
+#
+# Este schema define las entidades indexadas por The Graph
+# para el contrato FinCoreRemittance en Polygon.
+#
+# Entidades:
+# - Remittance: Remesas con estado actual
+# - RemittanceEvent: Historial de eventos
+# - DailyStats: Estadísticas diarias agregadas
+# - Token: Tokens soportados (USDC, USDT)
+# - Account: Cuentas de usuarios
+
+"""
+Remesa indexada desde el contrato FinCoreRemittance.
+Representa el estado actual de una remesa on-chain.
+"""
+type Remittance @entity {
+  "ID único = remittanceId del contrato"
+  id: ID!
+
+  "ID externo de referencia (bytes32)"
+  referenceId: Bytes!
+
+  "Dirección del remitente"
+  sender: Account!
+
+  "Token usado (USDC/USDT)"
+  token: Token!
+
+  "Monto en la unidad más pequeña del token"
+  amount: BigInt!
+
+  "Fee de plataforma cobrado"
+  platformFee: BigInt!
+
+  "Timestamp de creación (bloque)"
+  createdAt: BigInt!
+
+  "Timestamp de expiración (48h después)"
+  expiresAt: BigInt!
+
+  "Estado actual: Locked, Released, Refunded, Cancelled"
+  state: RemittanceState!
+
+  "Hash de la transacción de creación"
+  createdTxHash: Bytes!
+
+  "Número de bloque de creación"
+  createdBlockNumber: BigInt!
+
+  "Operador que liberó los fondos (si aplica)"
+  releasedBy: Account
+
+  "Hash de la transacción de liberación/reembolso"
+  finalTxHash: Bytes
+
+  "Timestamp de finalización"
+  finalizedAt: BigInt
+
+  "Historial de eventos asociados"
+  events: [RemittanceEvent!]! @derivedFrom(field: "remittance")
+}
+
+"""
+Estados posibles de una remesa.
+Mapea directamente al enum RemittanceState del contrato.
+"""
+enum RemittanceState {
+  Locked
+  Released
+  Refunded
+  Cancelled
+}
+
+"""
+Evento histórico de una remesa.
+Permite tracking completo de cambios de estado.
+"""
+type RemittanceEvent @entity {
+  "ID = txHash-logIndex"
+  id: ID!
+
+  "Tipo de evento"
+  eventType: EventType!
+
+  "Remesa asociada"
+  remittance: Remittance!
+
+  "Timestamp del evento"
+  timestamp: BigInt!
+
+  "Número de bloque"
+  blockNumber: BigInt!
+
+  "Hash de transacción"
+  txHash: Bytes!
+
+  "Log index en la transacción"
+  logIndex: BigInt!
+
+  "Datos adicionales del evento (JSON)"
+  data: String
+}
+
+"""
+Tipos de eventos soportados.
+"""
+enum EventType {
+  Created
+  Released
+  Refunded
+  TokenAdded
+  TokenRemoved
+  LiquidityPoolUpdated
+  PlatformFeeUpdated
+}
+
+"""
+Token ERC20 soportado por el contrato.
+"""
+type Token @entity {
+  "Dirección del token"
+  id: ID!
+
+  "Símbolo (USDC, USDT, etc.)"
+  symbol: String!
+
+  "Nombre completo"
+  name: String!
+
+  "Decimales"
+  decimals: Int!
+
+  "Si está actualmente soportado"
+  isSupported: Boolean!
+
+  "Total bloqueado actualmente"
+  totalLocked: BigInt!
+
+  "Total liberado históricamente"
+  totalReleased: BigInt!
+
+  "Total reembolsado históricamente"
+  totalRefunded: BigInt!
+
+  "Total fees cobrados"
+  totalFees: BigInt!
+
+  "Número de remesas usando este token"
+  remittanceCount: BigInt!
+
+  "Remesas que usan este token"
+  remittances: [Remittance!]! @derivedFrom(field: "token")
+}
+
+"""
+Cuenta de usuario (sender u operador).
+"""
+type Account @entity {
+  "Dirección de la cuenta"
+  id: ID!
+
+  "Número de remesas enviadas"
+  remittancesSentCount: BigInt!
+
+  "Volumen total enviado (en USD, 6 decimales)"
+  totalVolumeSent: BigInt!
+
+  "Número de remesas liberadas (si es operador)"
+  remittancesReleasedCount: BigInt!
+
+  "Primera actividad"
+  firstActivityAt: BigInt!
+
+  "Última actividad"
+  lastActivityAt: BigInt!
+
+  "Remesas enviadas"
+  remittancesSent: [Remittance!]! @derivedFrom(field: "sender")
+
+  "Remesas liberadas (como operador)"
+  remittancesReleased: [Remittance!]! @derivedFrom(field: "releasedBy")
+}
+
+"""
+Estadísticas diarias agregadas.
+Útil para dashboards y analytics.
+"""
+type DailyStats @entity {
+  "ID = fecha en formato YYYY-MM-DD"
+  id: ID!
+
+  "Fecha Unix (inicio del día)"
+  date: BigInt!
+
+  "Número de remesas creadas"
+  remittancesCreated: BigInt!
+
+  "Número de remesas completadas"
+  remittancesCompleted: BigInt!
+
+  "Número de remesas reembolsadas"
+  remittancesRefunded: BigInt!
+
+  "Volumen total bloqueado (USD, 6 decimales)"
+  volumeLocked: BigInt!
+
+  "Volumen total liberado"
+  volumeReleased: BigInt!
+
+  "Volumen total reembolsado"
+  volumeRefunded: BigInt!
+
+  "Fees totales cobrados"
+  feesCollected: BigInt!
+
+  "Usuarios únicos activos"
+  uniqueUsers: BigInt!
+
+  "Gas total usado"
+  totalGasUsed: BigInt!
+}
+
+"""
+Estadísticas globales del protocolo.
+Singleton con ID = "global".
+"""
+type ProtocolStats @entity {
+  "ID fijo = 'global'"
+  id: ID!
+
+  "Total de remesas creadas"
+  totalRemittances: BigInt!
+
+  "Total de remesas activas (Locked)"
+  activeRemittances: BigInt!
+
+  "Total de remesas completadas"
+  completedRemittances: BigInt!
+
+  "Total de remesas reembolsadas"
+  refundedRemittances: BigInt!
+
+  "Volumen total procesado (USD)"
+  totalVolume: BigInt!
+
+  "Fees totales cobrados"
+  totalFees: BigInt!
+
+  "Número de tokens soportados"
+  supportedTokensCount: BigInt!
+
+  "Número de usuarios únicos"
+  uniqueUsers: BigInt!
+
+  "Fee actual en basis points"
+  currentFeeBps: BigInt!
+
+  "Dirección del liquidity pool"
+  liquidityPool: Bytes!
+
+  "Última actualización"
+  lastUpdatedAt: BigInt!
+
+  "Último bloque procesado"
+  lastBlockNumber: BigInt!
+}

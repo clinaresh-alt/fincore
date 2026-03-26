@@ -29,6 +29,16 @@ from app.models.compliance import (
 from app.models.notification import (
     Notification, NotificationPreference, NotificationType, NotificationPriority
 )
+from app.models.remittance import (
+    Remittance, RemittanceBlockchainTx, ReconciliationLog, RemittanceLimit,
+    ExchangeRateHistory, RemittanceStatus, BlockchainRemittanceStatus,
+    PaymentMethod, DisbursementMethod, Currency, Stablecoin
+)
+from app.models.bank_account import (
+    BankAccount, BankTransaction, BankStatementImport, VirtualClabeAssignment,
+    BankProvider, BankAccountType, BankAccountStatus, BankTransactionType,
+    BankTransactionStatus, SpeiOperationType
+)
 
 __all__ = [
     # Core
@@ -81,4 +91,27 @@ __all__ = [
     "NotificationPreference",
     "NotificationType",
     "NotificationPriority",
+    # Remittances
+    "Remittance",
+    "RemittanceBlockchainTx",
+    "ReconciliationLog",
+    "RemittanceLimit",
+    "ExchangeRateHistory",
+    "RemittanceStatus",
+    "BlockchainRemittanceStatus",
+    "PaymentMethod",
+    "DisbursementMethod",
+    "Currency",
+    "Stablecoin",
+    # Bank Accounts
+    "BankAccount",
+    "BankTransaction",
+    "BankStatementImport",
+    "VirtualClabeAssignment",
+    "BankProvider",
+    "BankAccountType",
+    "BankAccountStatus",
+    "BankTransactionType",
+    "BankTransactionStatus",
+    "SpeiOperationType",
 ]

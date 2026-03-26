@@ -1,0 +1,83 @@
+# FinCore Remittance Subgraph Manifest
+#
+# Configuración para The Graph indexer.
+# Deploy a: https://thegraph.com/studio/
+#
+# Redes soportadas:
+# - matic (Polygon Mainnet)
+# - mumbai (Polygon Testnet)
+#
+# Comandos:
+#   npm run codegen        # Genera tipos TypeScript
+#   npm run build          # Compila el subgraph
+#   npm run deploy:mainnet # Deploy a Polygon mainnet
+#   npm run deploy:testnet # Deploy a Mumbai testnet
+
+specVersion: 0.0.5
+schema:
+  file: ./schema.graphql
+
+dataSources:
+  - kind: ethereum/contract
+    name: FinCoreRemittance
+    network: matic
+    source:
+      # Dirección del contrato - ACTUALIZAR ANTES DE DEPLOY
+      address: "0x0000000000000000000000000000000000000000"
+      abi: FinCoreRemittance
+      # Bloque de deployment - ACTUALIZAR ANTES DE DEPLOY
+      startBlock: 0
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Remittance
+        - RemittanceEvent
+        - Token
+        - Account
+        - DailyStats
+        - ProtocolStats
+      abis:
+        - name: FinCoreRemittance
+          file: ./abis/FinCoreRemittance.json
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: RemittanceCreated(indexed uint256,indexed bytes32,indexed address,address,uint256,uint256,uint256)
+          handler: handleRemittanceCreated
+        - event: RemittanceReleased(indexed uint256,indexed bytes32,indexed address,uint256)
+          handler: handleRemittanceReleased
+        - event: RemittanceRefunded(indexed uint256,indexed bytes32,indexed address,uint256)
+          handler: handleRemittanceRefunded
+        - event: TokenAdded(indexed address)
+          handler: handleTokenAdded
+        - event: TokenRemoved(indexed address)
+          handler: handleTokenRemoved
+        - event: LiquidityPoolUpdated(indexed address,indexed address)
+          handler: handleLiquidityPoolUpdated
+        - event: PlatformFeeUpdated(uint256,uint256)
+          handler: handlePlatformFeeUpdated
+      file: ./src/mapping.ts
+
+# Template para tokens ERC20 (USDC, USDT)
+# Se instancian dinámicamente cuando se añade un token
+templates:
+  - kind: ethereum/contract
+    name: ERC20Token
+    network: matic
+    source:
+      abi: ERC20
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      entities:
+        - Token
+      abis:
+        - name: ERC20
+          file: ./abis/ERC20.json
+      eventHandlers:
+        - event: Transfer(indexed address,indexed address,uint256)
+          handler: handleTransfer
+      file: ./src/token-mapping.ts

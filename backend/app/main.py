@@ -38,12 +38,28 @@ async def lifespan(app: FastAPI):
             logger.warning(f"No se pudieron crear tablas automaticamente: {e}")
             logger.info("Las tablas probablemente ya existen. Continuando...")
 
+    # Iniciar scheduler de jobs (reconciliacion, reembolsos, etc.)
+    try:
+        from app.core.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Scheduler de jobs iniciado")
+    except Exception as e:
+        logger.warning(f"No se pudo iniciar el scheduler: {e}")
+
     logger.info(f"FinCore {settings.APP_VERSION} iniciado correctamente")
 
     yield
 
     # Shutdown
     logger.info("Cerrando FinCore...")
+
+    # Detener scheduler
+    try:
+        from app.core.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+        logger.info("Scheduler detenido")
+    except Exception as e:
+        logger.warning(f"Error deteniendo scheduler: {e}")
 
 
 # Crear aplicacion FastAPI
