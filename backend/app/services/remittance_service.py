@@ -891,6 +891,61 @@ class RemittanceService:
             )
         ).all()
 
+    def get_user_limits(self, user_id: str) -> dict:
+        """
+        Obtiene limites de remesas para un usuario.
+
+        Calcula:
+        - Limite diario y mensual segun nivel KYC
+        - Monto usado hoy y este mes
+        - Monto disponible
+        """
+        from datetime import timedelta
+
+        # Limites base segun nivel KYC (en USD)
+        LIMITS = {
+            "basic": {"daily": 1000, "monthly": 5000},
+            "verified": {"daily": 5000, "monthly": 25000},
+            "premium": {"daily": 10000, "monthly": 50000},
+        }
+
+        # Por defecto nivel basic
+        kyc_level = "basic"
+        limits = LIMITS[kyc_level]
+
+        # Calcular inicio del dia y mes
+        now = datetime.utcnow()
+        start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # Suma de remesas de hoy
+        used_today = self.db.query(func.sum(Remittance.amount_stablecoin)).filter(
+            and_(
+                Remittance.sender_id == user_id,
+                Remittance.created_at >= start_of_day,
+                Remittance.status.notin_([RemittanceStatus.CANCELLED, RemittanceStatus.FAILED])
+            )
+        ).scalar() or Decimal("0")
+
+        # Suma de remesas este mes
+        used_this_month = self.db.query(func.sum(Remittance.amount_stablecoin)).filter(
+            and_(
+                Remittance.sender_id == user_id,
+                Remittance.created_at >= start_of_month,
+                Remittance.status.notin_([RemittanceStatus.CANCELLED, RemittanceStatus.FAILED])
+            )
+        ).scalar() or Decimal("0")
+
+        return {
+            "daily_limit": limits["daily"],
+            "monthly_limit": limits["monthly"],
+            "used_today": float(used_today),
+            "used_this_month": float(used_this_month),
+            "available_today": max(0, limits["daily"] - float(used_today)),
+            "available_this_month": max(0, limits["monthly"] - float(used_this_month)),
+            "kyc_level": kyc_level,
+        }
+
     # ============ Conciliacion ============
 
     async def run_reconciliation(self) -> ReconciliationLog:

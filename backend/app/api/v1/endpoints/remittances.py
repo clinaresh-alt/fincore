@@ -248,6 +248,33 @@ async def list_remittances(
     )
 
 
+@router.get("/limits", response_model=RemittanceLimitResponse)
+async def get_user_limits(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Obtiene los limites de remesas del usuario actual.
+
+    Incluye:
+    - Limite diario y mensual
+    - Monto usado hoy y este mes
+    - Monto disponible
+    """
+    service = RemittanceService(db)
+    limits = service.get_user_limits(str(current_user.id))
+
+    return RemittanceLimitResponse(
+        daily_limit=limits.get("daily_limit", 10000),
+        monthly_limit=limits.get("monthly_limit", 50000),
+        used_today=limits.get("used_today", 0),
+        used_this_month=limits.get("used_this_month", 0),
+        available_today=limits.get("available_today", 10000),
+        available_this_month=limits.get("available_this_month", 50000),
+        kyc_level=limits.get("kyc_level", "basic"),
+    )
+
+
 @router.get("/{remittance_id}", response_model=RemittanceResponse)
 async def get_remittance(
     remittance_id: str,
