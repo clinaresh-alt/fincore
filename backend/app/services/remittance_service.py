@@ -45,6 +45,24 @@ from app.models.user import User
 from app.models.compliance import KYCProfile, KYCLevel
 from app.services.blockchain_service import BlockchainService, TransactionResult
 from app.services.notification_service import NotificationService
+from app.services.compliance_screening_service import (
+    ComplianceScreeningService,
+    get_compliance_screening_service,
+    AddressBlockedException,
+    ScreeningDecision,
+)
+from app.schemas.compliance_screening import BlockchainNetwork, ScreeningAction
+from app.services.exchange_rate_service import (
+    ExchangeRateService,
+    CurrencyPair,
+    get_exchange_rate_service,
+    convert_usdc_to_mxn,
+)
+from app.services.job_queue_service import (
+    get_job_queue_service,
+    enqueue_spei_payment,
+    enqueue_bitso_conversion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,8 +238,47 @@ class RemittanceService:
         self.db = db
         self.network = network
         self.blockchain_service: Optional[BlockchainService] = None
+        self.compliance_service: Optional[ComplianceScreeningService] = None
+        self.exchange_rate_service: Optional[ExchangeRateService] = None
+        self.bitso_service = None
         self.contract_address = REMITTANCE_CONTRACT_ADDRESS
         self.contract_abi = REMITTANCE_CONTRACT_ABI
+
+    def _get_compliance_service(self) -> ComplianceScreeningService:
+        """Lazy initialization del compliance screening service."""
+        if self.compliance_service is None:
+            self.compliance_service = get_compliance_screening_service(self.db)
+        return self.compliance_service
+
+    async def _get_exchange_rate_service(self) -> ExchangeRateService:
+        """Lazy initialization del exchange rate service."""
+        if self.exchange_rate_service is None:
+            self.exchange_rate_service = await get_exchange_rate_service()
+        return self.exchange_rate_service
+
+    def _get_bitso_service(self):
+        """Lazy initialization del servicio Bitso."""
+        if self.bitso_service is None:
+            from app.services.bitso_service import BitsoService, BitsoConfig
+            from app.core.config import settings
+            config = BitsoConfig(
+                api_key=settings.BITSO_API_KEY,
+                api_secret=settings.BITSO_API_SECRET,
+                use_production=settings.BITSO_USE_PRODUCTION,
+            )
+            self.bitso_service = BitsoService(config)
+        return self.bitso_service
+
+    def _network_to_blockchain_network(self) -> BlockchainNetwork:
+        """Convierte el network string a BlockchainNetwork enum."""
+        network_map = {
+            "polygon": BlockchainNetwork.POLYGON,
+            "polygon_amoy": BlockchainNetwork.POLYGON,
+            "ethereum": BlockchainNetwork.ETHEREUM,
+            "arbitrum": BlockchainNetwork.ARBITRUM,
+            "base": BlockchainNetwork.BASE,
+        }
+        return network_map.get(self.network.lower(), BlockchainNetwork.POLYGON)
 
     def _get_blockchain_service(self) -> BlockchainService:
         """Lazy initialization del blockchain service."""
@@ -324,10 +381,39 @@ class RemittanceService:
         currency_to: Currency
     ) -> Decimal:
         """
-        Obtiene tasa de cambio actual.
-        TODO: Integrar con APIs reales (Banxico, Binance, etc.)
+        Obtiene tasa de cambio actual desde Bitso/exchange_rate_service.
+
+        Flujo:
+        1. Para USD/MXN o USDC/MXN: usar Bitso en tiempo real
+        2. Para otras monedas: usar tasas internas de referencia
         """
-        # Tasas simuladas - reemplazar con API real
+        if currency_from == currency_to:
+            return Decimal("1.0")
+
+        # Intentar obtener tasa de Bitso para pares cripto/MXN
+        try:
+            rate_service = await self._get_exchange_rate_service()
+
+            # Mapeo de pares de monedas
+            pair_map = {
+                (Currency.USD, Currency.MXN): CurrencyPair.USD_MXN,
+                (Currency.MXN, Currency.USD): CurrencyPair.MXN_USD,
+            }
+
+            pair = pair_map.get((currency_from, currency_to))
+            if pair:
+                rate = await rate_service.get_rate(pair)
+                if rate:
+                    logger.info(
+                        f"Tasa {currency_from.value}/{currency_to.value}: "
+                        f"{rate.mid} (fuente: {rate.source.value})"
+                    )
+                    return rate.mid
+
+        except Exception as e:
+            logger.warning(f"Error obteniendo tasa de Bitso: {e}, usando fallback")
+
+        # Fallback: tasas internas de referencia
         rates_to_usd = {
             Currency.MXN: Decimal("0.058"),  # 1 MXN = 0.058 USD
             Currency.USD: Decimal("1.0"),
@@ -338,9 +424,6 @@ class RemittanceService:
             Currency.BRL: Decimal("0.20"),
             Currency.ARS: Decimal("0.0012"),
         }
-
-        if currency_from == currency_to:
-            return Decimal("1.0")
 
         if currency_to == Currency.USD:
             return rates_to_usd.get(currency_from, Decimal("1.0"))
@@ -539,6 +622,9 @@ class RemittanceService:
         """
         Bloquea fondos en el smart contract de escrow.
 
+        IMPORTANTE: Realiza screening de compliance antes de bloquear.
+        Si la direccion tiene riesgo alto, la transaccion es rechazada.
+
         Args:
             remittance_id: ID de la remesa
             wallet_address: Wallet del usuario con los stablecoins
@@ -559,6 +645,75 @@ class RemittanceService:
                     success=False,
                     error=f"Estado invalido: {remittance.status.value}"
                 )
+
+            # ============ COMPLIANCE SCREENING ============
+            # Verificar direccion antes de procesar
+            logger.info(f"Iniciando screening de compliance para {wallet_address[:10]}...")
+
+            try:
+                compliance_svc = self._get_compliance_service()
+                screening_decision = await compliance_svc.screen_address_for_remittance(
+                    address=wallet_address,
+                    network=self._network_to_blockchain_network(),
+                    remittance_id=str(remittance.id),
+                    user_id=str(remittance.sender_id),
+                    amount_usd=remittance.amount_stablecoin,
+                    direction="inbound",
+                )
+
+                # Si requiere revision manual, actualizar estado
+                if screening_decision.requires_manual_review:
+                    remittance.compliance_review_required = True
+                    remittance.compliance_screening_id = screening_decision.screening_id
+                    remittance.compliance_risk_score = screening_decision.risk_score
+                    self.db.commit()
+
+                # Si no puede proceder, rechazar
+                if not screening_decision.can_proceed:
+                    logger.warning(
+                        f"Remesa {remittance.reference_code} rechazada por compliance: "
+                        f"{screening_decision.reason}"
+                    )
+                    remittance.status = RemittanceStatus.FAILED
+                    remittance.failure_reason = f"Compliance: {screening_decision.reason}"
+                    self.db.commit()
+                    return RemittanceResult(
+                        success=False,
+                        error=f"Transaccion rechazada por compliance: {screening_decision.reason}",
+                        status=RemittanceStatus.FAILED,
+                    )
+
+                logger.info(
+                    f"Screening aprobado para {wallet_address[:10]}...: "
+                    f"score={screening_decision.risk_score}, action={screening_decision.action.value}"
+                )
+
+            except AddressBlockedException as e:
+                logger.error(f"Direccion bloqueada: {e}")
+                remittance.status = RemittanceStatus.FAILED
+                remittance.failure_reason = f"Direccion bloqueada: {e.reason}"
+                self.db.commit()
+                return RemittanceResult(
+                    success=False,
+                    error=f"Direccion bloqueada por compliance: {e.reason}",
+                    status=RemittanceStatus.FAILED,
+                )
+
+            except Exception as e:
+                # Error en screening - aplicar politica conservadora
+                logger.error(f"Error en compliance screening: {e}")
+                # Para montos altos, bloquear; para montos bajos, continuar con alerta
+                if remittance.amount_stablecoin >= Decimal("1000"):
+                    remittance.compliance_review_required = True
+                    self.db.commit()
+                    return RemittanceResult(
+                        success=False,
+                        error=f"Error en verificacion de compliance, requiere revision manual",
+                    )
+                # Continuar con advertencia para montos bajos
+                logger.warning(f"Continuando sin screening completo para monto bajo")
+
+            # ============ FIN COMPLIANCE SCREENING ============
 
             # Crear registro de transaccion blockchain
             blockchain_tx = RemittanceBlockchainTx(
@@ -634,7 +789,13 @@ class RemittanceService:
         operator_id: str,
     ) -> RemittanceResult:
         """
-        Libera fondos del escrow (tras confirmar entrega fiat).
+        Libera fondos del escrow y procesa pago al beneficiario.
+
+        Flujo completo:
+        1. Liberar fondos del smart contract
+        2. Si es transferencia bancaria MXN, enviar SPEI automaticamente
+        3. Actualizar estado de remesa
+
         Solo puede ser llamado por operadores autorizados.
         """
         try:
@@ -651,7 +812,7 @@ class RemittanceService:
                     error=f"Estado invalido: {remittance.status.value}"
                 )
 
-            # Crear registro de transaccion
+            # Crear registro de transaccion blockchain
             blockchain_tx = RemittanceBlockchainTx(
                 remittance_id=remittance.id,
                 operation="release",
@@ -673,7 +834,7 @@ class RemittanceService:
                     error="Remesa no encontrada en blockchain"
                 )
 
-            # Llamar al smart contract
+            # Llamar al smart contract para liberar fondos
             blockchain_svc = self._get_blockchain_service()
             tx_result = blockchain_svc.execute_contract_function(
                 contract_address=self.contract_address,
@@ -699,13 +860,70 @@ class RemittanceService:
             blockchain_tx.submitted_at = datetime.utcnow()
             blockchain_tx.confirmed_at = datetime.utcnow()
 
-            # Actualizar estado
+            logger.info(f"Fondos liberados en blockchain para remesa {remittance.reference_code}")
+
+            # ============ CONVERSION BITSO (USDC -> MXN) ============
+            # Si es pago en MXN, primero convertir USDC a MXN via Bitso
+            bitso_result = None
+            if remittance.currency_destination == Currency.MXN:
+                bitso_result = await self._convert_usdc_to_mxn_via_bitso(remittance)
+
+                if not bitso_result.get("success"):
+                    # Conversion fallo - marcar para reintento
+                    remittance.bitso_error = bitso_result.get("error")
+                    logger.warning(
+                        f"Error en conversion Bitso para remesa {remittance.reference_code}: "
+                        f"{remittance.bitso_error}"
+                    )
+                    # Continuar sin SPEI si la conversion falla
+                    self.db.commit()
+                    return RemittanceResult(
+                        success=True,  # Blockchain exitoso, pero conversion pendiente
+                        remittance_id=str(remittance.id),
+                        reference_code=remittance.reference_code,
+                        status=RemittanceStatus.LOCKED,  # Mantener en LOCKED para reintento
+                        tx_hash=tx_result.tx_hash,
+                        error="Conversion USDC->MXN pendiente",
+                    )
+
+                logger.info(
+                    f"Conversion Bitso exitosa: {bitso_result.get('mxn_amount')} MXN "
+                    f"para remesa {remittance.reference_code}"
+                )
+            # ============ FIN CONVERSION BITSO ============
+
+            # ============ ENVIO SPEI AUTOMATICO ============
+            # Si es transferencia bancaria en MXN, enviar SPEI
+            spei_result = None
+            if (
+                remittance.disbursement_method == DisbursementMethod.BANK_TRANSFER and
+                remittance.currency_destination == Currency.MXN
+            ):
+                spei_result = await self._send_spei_payment(remittance)
+
+                if spei_result and spei_result.get("success"):
+                    remittance.spei_tracking_key = spei_result.get("tracking_key")
+                    remittance.spei_sent_at = datetime.utcnow()
+                    logger.info(
+                        f"SPEI enviado para remesa {remittance.reference_code}: "
+                        f"{spei_result.get('tracking_key')}"
+                    )
+                else:
+                    # SPEI fallo - marcar para reintento manual
+                    remittance.spei_error = spei_result.get("error") if spei_result else "Error desconocido"
+                    logger.warning(
+                        f"Error enviando SPEI para remesa {remittance.reference_code}: "
+                        f"{remittance.spei_error}"
+                    )
+            # ============ FIN ENVIO SPEI ============
+
+            # Actualizar estado final
             remittance.status = RemittanceStatus.DISBURSED
             remittance.completed_at = datetime.utcnow()
 
             self.db.commit()
 
-            logger.info(f"Fondos liberados para remesa {remittance.reference_code} - tx: {tx_result.tx_hash}")
+            logger.info(f"Remesa {remittance.reference_code} completada exitosamente")
 
             return RemittanceResult(
                 success=True,
@@ -719,6 +937,242 @@ class RemittanceService:
             self.db.rollback()
             logger.error(f"Error liberando fondos: {e}")
             return RemittanceResult(success=False, error=str(e))
+
+    async def _convert_usdc_to_mxn_via_bitso(
+        self,
+        remittance: Remittance,
+    ) -> Dict[str, Any]:
+        """
+        Convierte USDC a MXN via Bitso para pago fiat.
+
+        Flujo:
+        1. Vender USDC en Bitso (orden market)
+        2. Obtener MXN resultante
+        3. Actualizar remesa con detalles de conversion
+
+        Args:
+            remittance: Remesa con monto USDC a convertir
+
+        Returns:
+            Dict con resultado de conversion
+        """
+        try:
+            bitso = self._get_bitso_service()
+
+            # Verificar balance disponible en Bitso
+            usdc_balance = await bitso.get_balance("usdc")
+            if usdc_balance is None or usdc_balance.available < remittance.amount_stablecoin:
+                logger.warning(
+                    f"Balance USDC insuficiente en Bitso: "
+                    f"{usdc_balance.available if usdc_balance else 0} < {remittance.amount_stablecoin}"
+                )
+                return {
+                    "success": False,
+                    "error": "Balance USDC insuficiente en exchange",
+                }
+
+            # Ejecutar conversion USDC -> MXN
+            logger.info(
+                f"Convirtiendo {remittance.amount_stablecoin} USDC a MXN "
+                f"para remesa {remittance.reference_code}"
+            )
+
+            conversion_result = await bitso.convert_to_mxn(
+                amount_usdc=remittance.amount_stablecoin
+            )
+
+            if not conversion_result.success:
+                logger.error(
+                    f"Error en conversion Bitso: {conversion_result.error}"
+                )
+                return {
+                    "success": False,
+                    "error": conversion_result.error,
+                }
+
+            # Actualizar remesa con detalles de conversion
+            remittance.bitso_order_id = conversion_result.order_id
+            remittance.bitso_conversion_rate = conversion_result.rate
+            remittance.bitso_mxn_received = conversion_result.to_amount
+            remittance.bitso_fee = conversion_result.fee
+            remittance.bitso_converted_at = conversion_result.created_at
+
+            logger.info(
+                f"Conversion exitosa: {remittance.amount_stablecoin} USDC -> "
+                f"{conversion_result.to_amount} MXN @ {conversion_result.rate}"
+            )
+
+            return {
+                "success": True,
+                "order_id": conversion_result.order_id,
+                "mxn_amount": conversion_result.to_amount,
+                "rate": conversion_result.rate,
+                "fee": conversion_result.fee,
+            }
+
+        except Exception as e:
+            logger.error(f"Error en conversion Bitso: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    async def _enqueue_disbursement_jobs(
+        self,
+        remittance: Remittance,
+        use_queue: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Encola los jobs de disbursement (conversion + pago) en la cola de trabajo.
+
+        Args:
+            remittance: Remesa a procesar
+            use_queue: Si True, usa cola async; si False, ejecuta sync
+
+        Returns:
+            Dict con IDs de jobs encolados
+        """
+        try:
+            if not use_queue:
+                # Modo sincrono (legacy)
+                return await self._process_disbursement_sync(remittance)
+
+            job_ids = {}
+
+            # 1. Encolar conversion Bitso si es necesario
+            if remittance.currency_destination == Currency.MXN:
+                bitso_job_id = await enqueue_bitso_conversion(
+                    remittance_id=str(remittance.id),
+                    amount_usdc=remittance.amount_stablecoin,
+                )
+                job_ids["bitso_conversion"] = bitso_job_id
+                logger.info(
+                    f"Job de conversion encolado: {bitso_job_id} "
+                    f"para remesa {remittance.reference_code}"
+                )
+
+            # 2. Encolar pago SPEI si es transferencia bancaria
+            if (
+                remittance.disbursement_method == DisbursementMethod.BANK_TRANSFER and
+                remittance.currency_destination == Currency.MXN
+            ):
+                recipient = remittance.recipient_info or {}
+                clabe = recipient.get("clabe") or recipient.get("account_number")
+                name = recipient.get("name", "BENEFICIARIO")
+
+                if clabe and len(clabe) == 18:
+                    spei_job_id = await enqueue_spei_payment(
+                        remittance_id=str(remittance.id),
+                        clabe=clabe,
+                        beneficiary_name=name[:40],
+                        amount=remittance.amount_fiat_destination,
+                        concept=f"REMESA {remittance.reference_code}",
+                    )
+                    job_ids["spei_payment"] = spei_job_id
+                    logger.info(
+                        f"Job de SPEI encolado: {spei_job_id} "
+                        f"para remesa {remittance.reference_code}"
+                    )
+
+            return {
+                "success": True,
+                "mode": "async",
+                "job_ids": job_ids,
+            }
+
+        except Exception as e:
+            logger.error(f"Error encolando jobs: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    async def _process_disbursement_sync(
+        self,
+        remittance: Remittance,
+    ) -> Dict[str, Any]:
+        """
+        Procesa disbursement de forma sincrona (fallback).
+        """
+        result = {}
+
+        # Conversion Bitso
+        if remittance.currency_destination == Currency.MXN:
+            bitso_result = await self._convert_usdc_to_mxn_via_bitso(remittance)
+            result["bitso"] = bitso_result
+            if not bitso_result.get("success"):
+                return {"success": False, "error": bitso_result.get("error")}
+
+        # Pago SPEI
+        if (
+            remittance.disbursement_method == DisbursementMethod.BANK_TRANSFER and
+            remittance.currency_destination == Currency.MXN
+        ):
+            spei_result = await self._send_spei_payment(remittance)
+            result["spei"] = spei_result
+
+        result["success"] = True
+        result["mode"] = "sync"
+        return result
+
+    async def _send_spei_payment(self, remittance: Remittance) -> Dict[str, Any]:
+        """
+        Envia pago SPEI al beneficiario de la remesa.
+
+        Args:
+            remittance: Objeto Remittance con datos del beneficiario
+
+        Returns:
+            Dict con resultado del envio SPEI
+        """
+        try:
+            from app.services.stp_service import get_stp_service, STPError
+
+            # Extraer datos del beneficiario
+            recipient = remittance.recipient_info or {}
+            clabe = recipient.get("clabe") or recipient.get("account_number")
+            name = recipient.get("name", "BENEFICIARIO")
+            rfc = recipient.get("rfc")
+
+            if not clabe or len(clabe) != 18:
+                return {
+                    "success": False,
+                    "error": "CLABE del beneficiario no valida"
+                }
+
+            # Obtener servicio STP
+            stp_service = get_stp_service(self.db)
+
+            # Enviar SPEI
+            result = await stp_service.send_spei_payment(
+                beneficiary_clabe=clabe,
+                beneficiary_name=name[:40],  # Max 40 chars
+                amount=remittance.amount_fiat_destination,
+                concept=f"REMESA {remittance.reference_code}",
+                remittance_id=str(remittance.id),
+                user_id=str(remittance.sender_id),
+                beneficiary_rfc=rfc,
+            )
+
+            if result.status.value in ["sent", "liquidated"]:
+                return {
+                    "success": True,
+                    "tracking_key": result.tracking_key,
+                    "stp_id": result.stp_id,
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": result.error_message or result.status_description,
+                    "tracking_key": result.tracking_key,
+                }
+
+        except Exception as e:
+            logger.error(f"Error en _send_spei_payment: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     async def _get_onchain_remittance_id(self, reference_code: str) -> Optional[int]:
         """Obtiene el ID de remesa en el smart contract por codigo de referencia."""

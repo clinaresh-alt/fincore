@@ -97,11 +97,14 @@ export default function RemittancesPage() {
     setError(null);
     try {
       const data = await remittancesAPI.list();
-      const remittanceList = data.remittances || data || [];
+      // La API devuelve { items: [...], total: N, page: N, ... }
+      const remittanceList = Array.isArray(data)
+        ? data
+        : (data.items || data.remittances || []);
       setRemittances(remittanceList);
 
       // Calculate stats
-      const total = remittanceList.length;
+      const total = data.total || remittanceList.length;
       const pending = remittanceList.filter((r: Remittance) =>
         ["initiated", "pending_deposit", "deposited", "locked", "processing"].includes(r.status)
       ).length;

@@ -817,4 +817,124 @@ export const remittancesAPI = {
   },
 };
 
+// === MONITORING DASHBOARD API ===
+export const monitoringAPI = {
+  // Dashboard snapshot
+  getSnapshot: async () => {
+    const response = await apiClient.get("/dashboard/snapshot");
+    return response.data;
+  },
+
+  // Health check
+  getHealth: async () => {
+    const response = await apiClient.get("/dashboard/health");
+    return response.data;
+  },
+
+  // Metrics
+  getRemittanceMetrics: async () => {
+    const response = await apiClient.get("/dashboard/metrics/remittances");
+    return response.data;
+  },
+
+  getFinancialMetrics: async () => {
+    const response = await apiClient.get("/dashboard/metrics/financial");
+    return response.data;
+  },
+
+  getQueueMetrics: async () => {
+    const response = await apiClient.get("/dashboard/metrics/queue");
+    return response.data;
+  },
+
+  getSystemMetrics: async () => {
+    const response = await apiClient.get("/dashboard/metrics/system");
+    return response.data;
+  },
+
+  // Status
+  getSystemStatus: async () => {
+    const response = await apiClient.get("/dashboard/status");
+    return response.data;
+  },
+
+  getServiceStatus: async (serviceName: string) => {
+    const response = await apiClient.get(`/dashboard/status/service/${serviceName}`);
+    return response.data;
+  },
+
+  // Alerts
+  listAlerts: async (params?: { status?: string; severity?: string; limit?: number }) => {
+    const response = await apiClient.get("/dashboard/alerts", { params });
+    return response.data;
+  },
+
+  getAlertSummary: async () => {
+    const response = await apiClient.get("/dashboard/alerts/summary");
+    return response.data;
+  },
+
+  getAlert: async (alertId: string) => {
+    const response = await apiClient.get(`/dashboard/alerts/${alertId}`);
+    return response.data;
+  },
+
+  acknowledgeAlert: async (alertId: string, acknowledgedBy: string, comment?: string) => {
+    const response = await apiClient.post(`/dashboard/alerts/${alertId}/acknowledge`, {
+      acknowledged_by: acknowledgedBy,
+      comment,
+    });
+    return response.data;
+  },
+
+  resolveAlert: async (alertId: string) => {
+    const response = await apiClient.post(`/dashboard/alerts/${alertId}/resolve`);
+    return response.data;
+  },
+
+  silenceAlert: async (alertId: string, durationMinutes: number, reason?: string) => {
+    const response = await apiClient.post(`/dashboard/alerts/${alertId}/silence`, {
+      duration_minutes: durationMinutes,
+      reason,
+    });
+    return response.data;
+  },
+
+  // Alert Rules
+  listAlertRules: async () => {
+    const response = await apiClient.get("/dashboard/rules");
+    return response.data;
+  },
+
+  createAlertRule: async (data: {
+    name: string;
+    type: string;
+    severity: string;
+    metric: string;
+    operator: string;
+    threshold: number;
+    duration_seconds?: number;
+    notify_channels?: string[];
+    description?: string;
+  }) => {
+    const response = await apiClient.post("/dashboard/rules", data);
+    return response.data;
+  },
+
+  updateAlertRule: async (ruleId: string, data: {
+    name?: string;
+    severity?: string;
+    threshold?: number;
+    enabled?: boolean;
+    notify_channels?: string[];
+  }) => {
+    const response = await apiClient.put(`/dashboard/rules/${ruleId}`, data);
+    return response.data;
+  },
+
+  deleteAlertRule: async (ruleId: string) => {
+    await apiClient.delete(`/dashboard/rules/${ruleId}`);
+  },
+};
+
 export default apiClient;

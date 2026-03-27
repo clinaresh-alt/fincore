@@ -807,3 +807,287 @@ def get_webhook_service() -> WebhookService:
 
 # Alias para compatibilidad
 webhook_service = get_webhook_service
+
+
+# ==================== Procesamiento de Webhooks Entrantes ====================
+
+class InboundWebhookProcessor:
+    """
+    Procesa webhooks entrantes de STP y Bitso.
+
+    Actualiza estados de remesas y notifica a clientes.
+    """
+
+    # Codigos de devolucion STP
+    STP_RETURN_CODES = {
+        1: "Cuenta inexistente",
+        2: "Cuenta bloqueada",
+        3: "Cuenta cancelada",
+        4: "Nombre no coincide",
+        5: "RFC no coincide",
+        6: "Orden duplicada",
+        7: "Cuenta no permite recepcion",
+        8: "Tipo de cuenta invalido",
+        9: "Excede limite de monto",
+        10: "Error de formato",
+        99: "Otro",
+    }
+
+    def __init__(self, db: Session):
+        self.db = db
+        self._webhook_service = None
+
+    def _get_webhook_service(self) -> WebhookService:
+        if self._webhook_service is None:
+            self._webhook_service = WebhookService(self.db)
+        return self._webhook_service
+
+    async def process_stp_webhook(
+        self,
+        payload: bytes,
+        signature: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Procesa webhook entrante de STP.
+
+        Args:
+            payload: Body del request
+            signature: Firma HMAC del header
+
+        Returns:
+            Resultado del procesamiento
+        """
+        from app.core.config import settings
+
+        # Verificar firma si esta configurada
+        if settings.STP_WEBHOOK_SECRET and signature:
+            expected = hmac.new(
+                settings.STP_WEBHOOK_SECRET.encode(),
+                payload,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected, signature):
+                logger.warning("Firma de webhook STP invalida")
+                raise SignatureError("Firma invalida")
+
+        # Parsear payload
+        try:
+            data = json.loads(payload)
+        except Exception as e:
+            logger.error(f"Error parseando webhook STP: {e}")
+            raise WebhookError(f"Payload invalido: {e}")
+
+        tracking_key = data.get("claveRastreo")
+        estado = data.get("estado")
+        monto_centavos = data.get("monto", 0)
+        causa_devolucion = data.get("causaDevolucion")
+
+        logger.info(f"Webhook STP recibido: tracking_key={tracking_key}, estado={estado}")
+
+        # Buscar remesa por tracking key
+        from app.models.remittance import Remittance, RemittanceStatus
+
+        remittance = self.db.query(Remittance).filter(
+            Remittance.spei_tracking_key == tracking_key
+        ).first()
+
+        if not remittance:
+            logger.warning(f"Remesa no encontrada para tracking_key: {tracking_key}")
+            return {"action": "ignored", "reason": "remittance_not_found"}
+
+        result = {}
+
+        if estado == 0:  # Liquidado
+            remittance.status = RemittanceStatus.COMPLETED
+            remittance.spei_liquidated_at = datetime.utcnow()
+            remittance.completed_at = datetime.utcnow()
+            self.db.commit()
+
+            result = {
+                "action": "completed",
+                "remittance_id": str(remittance.id),
+                "reference_code": remittance.reference_code,
+            }
+
+            # Notificar clientes
+            await self._get_webhook_service().send(
+                event=WebhookEvent.REMITTANCE_COMPLETED.value,
+                data={
+                    "remittance_id": str(remittance.id),
+                    "reference_code": remittance.reference_code,
+                    "status": "completed",
+                    "tracking_key": tracking_key,
+                    "amount": float(remittance.amount_fiat_destination),
+                }
+            )
+
+        elif estado == 2:  # Devuelto
+            return_reason = self.STP_RETURN_CODES.get(causa_devolucion or 99, "Razon desconocida")
+            remittance.status = RemittanceStatus.FAILED
+            remittance.spei_error = f"Devuelto: {return_reason}"
+            remittance.failure_reason = return_reason
+            self.db.commit()
+
+            result = {
+                "action": "returned",
+                "remittance_id": str(remittance.id),
+                "reason": return_reason,
+                "return_code": causa_devolucion,
+            }
+
+            await self._get_webhook_service().send(
+                event=WebhookEvent.REMITTANCE_FAILED.value,
+                data={
+                    "remittance_id": str(remittance.id),
+                    "reference_code": remittance.reference_code,
+                    "status": "failed",
+                    "reason": return_reason,
+                }
+            )
+
+        elif estado == 3:  # Cancelado
+            remittance.status = RemittanceStatus.CANCELLED
+            self.db.commit()
+            result = {"action": "cancelled", "remittance_id": str(remittance.id)}
+
+        else:
+            result = {"action": "unknown", "state": estado}
+
+        logger.info(f"Webhook STP procesado: {result}")
+        return result
+
+    async def process_bitso_webhook(
+        self,
+        payload: bytes,
+        signature: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Procesa webhook entrante de Bitso.
+
+        Args:
+            payload: Body del request
+            signature: Firma del header X-Bitso-Signature
+
+        Returns:
+            Resultado del procesamiento
+        """
+        from app.core.config import settings
+
+        # Verificar firma
+        if settings.BITSO_WEBHOOK_SECRET and signature:
+            expected = hmac.new(
+                settings.BITSO_WEBHOOK_SECRET.encode(),
+                payload,
+                hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected, signature):
+                logger.warning("Firma de webhook Bitso invalida")
+                raise SignatureError("Firma invalida")
+
+        # Parsear payload
+        try:
+            data = json.loads(payload)
+        except Exception as e:
+            logger.error(f"Error parseando webhook Bitso: {e}")
+            raise WebhookError(f"Payload invalido: {e}")
+
+        event_type = data.get("type", "")
+        event_payload = data.get("payload", {})
+
+        logger.info(f"Webhook Bitso recibido: type={event_type}")
+
+        from app.models.remittance import Remittance, RemittanceStatus
+        from decimal import Decimal
+
+        result = {}
+
+        if event_type == "withdrawal.complete":
+            wid = event_payload.get("wid")
+            remittance = self.db.query(Remittance).filter(
+                Remittance.bitso_withdrawal_id == wid
+            ).first()
+
+            if remittance:
+                remittance.status = RemittanceStatus.COMPLETED
+                remittance.completed_at = datetime.utcnow()
+                self.db.commit()
+
+                result = {
+                    "action": "withdrawal_completed",
+                    "remittance_id": str(remittance.id),
+                }
+
+                await self._get_webhook_service().send(
+                    event=WebhookEvent.REMITTANCE_COMPLETED.value,
+                    data={
+                        "remittance_id": str(remittance.id),
+                        "reference_code": remittance.reference_code,
+                        "status": "completed",
+                        "bitso_withdrawal_id": wid,
+                    }
+                )
+            else:
+                result = {"action": "ignored", "reason": "remittance_not_found"}
+
+        elif event_type == "withdrawal.failed":
+            wid = event_payload.get("wid")
+            error = event_payload.get("error", "Unknown error")
+
+            remittance = self.db.query(Remittance).filter(
+                Remittance.bitso_withdrawal_id == wid
+            ).first()
+
+            if remittance:
+                remittance.bitso_error = error
+                self.db.commit()
+
+                result = {
+                    "action": "withdrawal_failed",
+                    "remittance_id": str(remittance.id),
+                    "error": error,
+                }
+            else:
+                result = {"action": "ignored", "reason": "remittance_not_found"}
+
+        elif event_type == "order.completed":
+            oid = event_payload.get("oid")
+            remittance = self.db.query(Remittance).filter(
+                Remittance.bitso_order_id == oid
+            ).first()
+
+            if remittance:
+                price = event_payload.get("price")
+                if price:
+                    remittance.bitso_conversion_rate = Decimal(str(price))
+                    self.db.commit()
+
+                result = {
+                    "action": "order_completed",
+                    "remittance_id": str(remittance.id),
+                }
+            else:
+                result = {"action": "ignored", "reason": "remittance_not_found"}
+
+        elif event_type == "funding.complete":
+            # Deposito recibido
+            currency = event_payload.get("currency")
+            amount = event_payload.get("amount")
+            tx_hash = event_payload.get("tx_hash")
+
+            logger.info(f"Deposito Bitso: {amount} {currency} - tx: {tx_hash}")
+            result = {
+                "action": "deposit_received",
+                "currency": currency,
+                "amount": amount,
+            }
+
+        else:
+            result = {"action": "unknown", "type": event_type}
+
+        logger.info(f"Webhook Bitso procesado: {result}")
+        return result
+
+
+def get_inbound_webhook_processor(db: Session) -> InboundWebhookProcessor:
+    """Factory para obtener procesador de webhooks entrantes."""
+    return InboundWebhookProcessor(db)

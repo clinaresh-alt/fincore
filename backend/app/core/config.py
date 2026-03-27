@@ -104,6 +104,66 @@ class Settings(BaseSettings):
     GAS_PRICE_MULTIPLIER: float = 1.1
     MAX_GAS_PRICE_GWEI: int = 500
 
+    # ==================== COMPLIANCE / PLD ====================
+    # Chainalysis API (analisis on-chain)
+    CHAINALYSIS_API_KEY: str = ""
+    CHAINALYSIS_API_URL: str = "https://api.chainalysis.com/api"
+    CHAINALYSIS_KYT_URL: str = "https://api.chainalysis.com/api/kyt/v2"
+    CHAINALYSIS_SANCTIONS_URL: str = "https://api.chainalysis.com/api/sanctions/v1"
+    CHAINALYSIS_TIMEOUT: int = 30
+
+    # Elliptic API (alternativa/failover)
+    ELLIPTIC_API_KEY: str = ""
+    ELLIPTIC_API_URL: str = "https://aml-api.elliptic.co/v2"
+
+    # Screening Thresholds
+    SCREENING_AUTO_APPROVE_MAX_SCORE: int = 30
+    SCREENING_REVIEW_MIN_SCORE: int = 31
+    SCREENING_AUTO_REJECT_MIN_SCORE: int = 70
+    SCREENING_BLOCK_MIN_SCORE: int = 90
+    SCREENING_ENHANCED_AMOUNT_USD: float = 3000.0
+    SCREENING_AUTO_REPORT_AMOUNT_USD: float = 10000.0
+
+    # Compliance Notifications
+    COMPLIANCE_ALERT_EMAIL: str = ""
+    COMPLIANCE_WEBHOOK_URL: str = ""
+
+    # ==================== STP (SPEI) ====================
+    # Configuracion de STP para transferencias SPEI
+    STP_API_URL: str = "https://demo.stpmex.com/speiws/rest"
+    STP_API_URL_PROD: str = "https://prod.stpmex.com/speiws/rest"
+    STP_USE_PRODUCTION: bool = False
+    STP_EMPRESA: str = ""  # Codigo de empresa asignado por STP
+    STP_PRIVATE_KEY_PATH: str = ""  # Ruta al archivo .pem de firma
+    STP_PRIVATE_KEY_PASSWORD: str = ""  # Password de la llave privada
+    STP_CLABE_CONCENTRADORA: str = ""  # CLABE de cuenta concentradora
+    STP_TIMEOUT: int = 30
+    STP_WEBHOOK_SECRET: str = ""  # Secret para verificar webhooks
+
+    # ==================== BITSO (Exchange Cripto-Fiat) ====================
+    # Credenciales de API (obtener en https://bitso.com/api_info)
+    BITSO_API_KEY: str = ""
+    BITSO_API_SECRET: str = ""
+    BITSO_USE_PRODUCTION: bool = False  # False = sandbox
+
+    # URLs de API
+    BITSO_API_URL: str = "https://api.bitso.com"
+    BITSO_SANDBOX_URL: str = "https://api-dev.bitso.com"
+
+    # Configuracion de trading
+    BITSO_DEFAULT_BOOK: str = "usdc_mxn"  # Libro por defecto
+    BITSO_TIMEOUT: int = 30  # Timeout en segundos
+
+    # Limites de conversion
+    BITSO_MIN_USDC_CONVERSION: float = 1.0  # Minimo 1 USDC
+    BITSO_MAX_USDC_CONVERSION: float = 50000.0  # Maximo 50k USDC por tx
+
+    # Cache de tasas (segundos)
+    BITSO_RATE_CACHE_TTL: int = 30
+
+    # Webhook
+    BITSO_WEBHOOK_SECRET: str = ""
+
     # Network Chain IDs
     POLYGON_CHAIN_ID: int = 137
     POLYGON_AMOY_CHAIN_ID: int = 80002

@@ -556,3 +556,166 @@ export interface RemittanceLimit {
   daily_limit_usd: number;
   monthly_limit_usd: number;
 }
+
+// === MONITORING DASHBOARD ===
+export type ServiceStatus = "healthy" | "degraded" | "down" | "unknown";
+
+export type MonitoringAlertSeverity = "info" | "warning" | "error" | "critical";
+
+export type MonitoringAlertStatus = "active" | "acknowledged" | "resolved" | "silenced";
+
+export type MonitoringAlertType =
+  | "system.down"
+  | "system.degraded"
+  | "high_latency"
+  | "remittance.stuck"
+  | "remittance.failed"
+  | "high_failure_rate"
+  | "low_balance"
+  | "high_volume"
+  | "rate_deviation"
+  | "compliance.alert"
+  | "screening.failed"
+  | "stp.unreachable"
+  | "bitso.unreachable"
+  | "blockchain.congestion"
+  | "queue.backlog"
+  | "dead_letter.high"
+  | "worker.down";
+
+export interface ServiceHealth {
+  name: string;
+  status: ServiceStatus;
+  latency_ms: number | null;
+  last_check: string;
+  error_message: string | null;
+}
+
+export interface IntegrationStatus {
+  database: ServiceHealth;
+  redis: ServiceHealth;
+  stp: ServiceHealth;
+  bitso: ServiceHealth;
+  blockchain: ServiceHealth;
+}
+
+export interface SystemStatus {
+  overall_status: ServiceStatus;
+  is_healthy: boolean;
+  active_alerts: number;
+  services: {
+    database: { status: string; latency_ms: number | null; error: string | null };
+    redis: { status: string; latency_ms: number | null; error: string | null };
+    stp: { status: string; latency_ms: number | null; error: string | null };
+    bitso: { status: string; latency_ms: number | null; error: string | null };
+    blockchain: { status: string; latency_ms: number | null; error: string | null };
+  };
+  last_updated: string;
+}
+
+export interface RemittanceMetrics {
+  total_count: number;
+  completed_count: number;
+  failed_count: number;
+  pending_count: number;
+  processing_count: number;
+  total_volume_usdc: number;
+  total_volume_mxn: number;
+  avg_processing_time_seconds: number;
+  success_rate: number;
+  last_hour_count: number;
+  last_24h_count: number;
+  last_7d_count: number;
+}
+
+export interface FinancialMetrics {
+  usdc_balance: number;
+  mxn_balance: number;
+  usdc_available: number;
+  mxn_available: number;
+  daily_volume_usdc: number;
+  daily_volume_mxn: number;
+  current_rate_usdc_mxn: number;
+  rate_change_24h: number;
+  total_fees_collected: number;
+  avg_fee_percentage: number;
+}
+
+export interface QueueMetrics {
+  pending_jobs: number;
+  processing_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  dead_letter_jobs: number;
+  avg_wait_time_seconds: number;
+  avg_processing_time_seconds: number;
+  jobs_per_minute: number;
+  error_rate: number;
+  active_workers: number;
+  jobs_by_type: Record<string, number>;
+}
+
+export interface SystemMetrics {
+  cpu_usage: number;
+  memory_usage: number;
+  disk_usage: number;
+  active_connections: number;
+  requests_per_second: number;
+  avg_response_time_ms: number;
+  error_rate: number;
+  uptime_seconds: number;
+}
+
+export interface MonitoringAlert {
+  id: string;
+  type: MonitoringAlertType;
+  severity: MonitoringAlertSeverity;
+  status: MonitoringAlertStatus;
+  title: string;
+  message: string;
+  triggered_at: string;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  resolved_at: string | null;
+  remittance_id: string | null;
+  job_id: string | null;
+}
+
+export interface AlertSummary {
+  total_active: number;
+  by_severity: Record<string, number>;
+  by_type: Record<string, number>;
+  recent: Array<{
+    id: string;
+    type: string;
+    severity: string;
+    title: string;
+    triggered_at: string;
+  }>;
+}
+
+export interface DashboardSnapshot {
+  timestamp: string;
+  remittances: RemittanceMetrics;
+  financial: FinancialMetrics;
+  queue: QueueMetrics;
+  system: SystemMetrics;
+  status: {
+    overall: string;
+    services: Record<string, string>;
+    active_alerts: number;
+  };
+  alerts: {
+    total_active: number;
+    by_severity: Record<string, number>;
+    by_type: Record<string, number>;
+  };
+  recent_remittances: Array<{
+    id: string;
+    reference_code: string;
+    status: string;
+    amount_source: number;
+    amount_destination: number;
+    created_at: string;
+  }>;
+}

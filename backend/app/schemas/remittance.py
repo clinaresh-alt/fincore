@@ -224,16 +224,14 @@ class ReconciliationLogResponse(BaseModel):
 
 
 class RemittanceLimitResponse(BaseModel):
-    """Limites de remesa por nivel KYC."""
-    kyc_level: int
-    min_amount_usd: Decimal
-    max_amount_usd: Decimal
-    daily_limit_usd: Decimal
-    monthly_limit_usd: Decimal
-    current_daily_used: Decimal
-    current_monthly_used: Decimal
-    available_daily: Decimal
-    available_monthly: Decimal
+    """Limites de remesa para el usuario."""
+    daily_limit: float
+    monthly_limit: float
+    used_today: float
+    used_this_month: float
+    available_today: float
+    available_this_month: float
+    kyc_level: str
 
 
 class ExchangeRateResponse(BaseModel):
