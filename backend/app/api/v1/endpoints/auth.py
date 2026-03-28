@@ -363,6 +363,71 @@ async def get_current_user_info(
     return current_user
 
 
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Renueva el access_token usando un refresh_token válido.
+    """
+    # Obtener refresh_token del body
+    try:
+        body = await request.json()
+        refresh_token_str = body.get("refresh_token")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="refresh_token es requerido"
+        )
+
+    if not refresh_token_str:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="refresh_token es requerido"
+        )
+
+    # Decodificar y validar refresh token
+    payload = decode_token(refresh_token_str)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token invalido o expirado"
+        )
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token no es de tipo refresh"
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token invalido"
+        )
+
+    # Verificar que el usuario existe y está activo
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario no encontrado o inactivo"
+        )
+
+    # Generar nuevos tokens
+    new_access_token = create_access_token({"sub": str(user.id)})
+    new_refresh_token = create_refresh_token({"sub": str(user.id)})
+
+    return TokenResponse(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        mfa_required=False
+    )
+
+
 @router.post("/logout")
 async def logout(
     current_user: User = Depends(get_current_user),
