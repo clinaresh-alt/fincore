@@ -237,13 +237,40 @@ frontend/
 
 ## Seguridad
 
-- Autenticacion JWT con refresh tokens
-- Cifrado de datos sensibles (AES-256)
-- Rate limiting en endpoints criticos
-- Validacion de entrada con Pydantic
-- Sanitizacion de outputs
-- CORS configurado apropiadamente
-- Headers de seguridad (CSP, HSTS, etc.)
+FinCore implementa multiples capas de seguridad:
+
+### Autenticacion y Cifrado
+- **JWT** con refresh tokens (access: 30min, refresh: 7 dias)
+- **MFA** con TOTP (Google Authenticator)
+- **AES-256-GCM** para datos sensibles en reposo
+- **PBKDF2** con salt dinamico para derivacion de claves
+- **HashiCorp Vault** para gestion de secretos
+
+### Proteccion de API
+- **Rate Limiting** con SlowAPI (5-100 req/min segun endpoint)
+- **CORS** restrictivo (origins especificos)
+- **Headers de seguridad**: CSP, HSTS, X-Frame-Options, X-XSS-Protection
+- **Validacion HMAC-SHA256** en webhooks (STP, Bitso)
+
+### Herramientas de Analisis
+```bash
+# Analisis estatico de seguridad
+bandit -r backend/app -f html -o security-report.html
+
+# Deteccion de secretos
+gitleaks detect --source .
+
+# Auditoria de dependencias
+pip-audit -r requirements.txt
+npm audit
+```
+
+### Ultimo Audit
+- **Fecha**: Marzo 2026
+- **Vulnerabilidades encontradas**: 23
+- **Estado**: Todas corregidas
+
+Ver [SECURITY.md](SECURITY.md) para detalles completos del audit y configuracion segura.
 
 ## Compliance
 
