@@ -680,14 +680,14 @@ class BlockchainService:
             logger.error(f"Error getting receipt: {e}")
             return None
 
-    def wait_for_confirmation(
+    async def wait_for_confirmation(
         self,
         tx_hash: str,
         timeout: int = 300,
         confirmations: int = 1
     ) -> TransactionResult:
         """
-        Espera confirmacion de una transaccion.
+        Espera confirmacion de una transaccion (async).
 
         Args:
             tx_hash: Hash de la transaccion
@@ -697,17 +697,26 @@ class BlockchainService:
         Returns:
             Resultado de la transaccion
         """
+        import asyncio
+
         try:
-            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+            # Ejecutar la espera del receipt en un thread pool para no bloquear
+            loop = asyncio.get_event_loop()
+            receipt = await loop.run_in_executor(
+                None,
+                lambda: self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=timeout)
+            )
 
             # Esperar confirmaciones adicionales si es necesario
             if confirmations > 1:
-                while True:
+                max_wait = timeout  # segundos máximos de espera
+                elapsed = 0
+                while elapsed < max_wait:
                     current_block = self.w3.eth.block_number
                     if current_block - receipt['blockNumber'] >= confirmations:
                         break
-                    import time
-                    time.sleep(2)
+                    await asyncio.sleep(2)  # Non-blocking sleep
+                    elapsed += 2
 
             return TransactionResult(
                 success=receipt['status'] == 1,
@@ -716,8 +725,14 @@ class BlockchainService:
                 gas_used=receipt['gasUsed'],
                 logs=self._parse_logs(receipt.get('logs', []))
             )
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout waiting for confirmation: {tx_hash}")
+            return TransactionResult(success=False, tx_hash=tx_hash, error="Timeout waiting for confirmation")
+        except (TransactionNotFound, ContractLogicError) as e:
+            logger.error(f"Transaction error for {tx_hash}: {e}")
+            return TransactionResult(success=False, tx_hash=tx_hash, error=str(e))
         except Exception as e:
-            logger.error(f"Error waiting for confirmation: {e}")
+            logger.error(f"Unexpected error waiting for confirmation: {e}")
             return TransactionResult(success=False, tx_hash=tx_hash, error=str(e))
 
     # ==================== KYC BLOCKCHAIN ====================

@@ -146,11 +146,17 @@ class BitsoService:
         Args:
             db: Sesion de base de datos
             config: Configuracion opcional
+
+        Raises:
+            ValueError: Si las credenciales están vacías en producción
         """
         self.db = db
         self.config = config or self._load_config_from_settings()
         self._client: Optional[httpx.AsyncClient] = None
         self._rate_cache: Dict[str, BitsoRateCache] = {}
+
+        # Validar credenciales en producción
+        self._validate_credentials()
 
     def _load_config_from_settings(self) -> BitsoConfig:
         """Carga configuracion desde settings."""
@@ -163,6 +169,27 @@ class BitsoService:
             timeout_seconds=int(getattr(settings, 'BITSO_TIMEOUT', 30)),
             rate_cache_ttl=int(getattr(settings, 'BITSO_RATE_CACHE_TTL', 30)),
         )
+
+    def _validate_credentials(self) -> None:
+        """
+        Valida que las credenciales de Bitso estén configuradas.
+
+        En producción (no sandbox), las credenciales son obligatorias.
+        En sandbox, se permite operar sin credenciales para endpoints públicos.
+        """
+        if not self.config.use_sandbox:
+            # En producción, credenciales son obligatorias
+            if not self.config.api_key or not self.config.api_secret:
+                raise ValueError(
+                    "BITSO_API_KEY y BITSO_API_SECRET son obligatorios en producción. "
+                    "Configure las variables de entorno o use sandbox mode."
+                )
+
+            # Validar formato mínimo de credenciales
+            if len(self.config.api_key) < 10:
+                raise ValueError("BITSO_API_KEY parece inválido (muy corto)")
+            if len(self.config.api_secret) < 10:
+                raise ValueError("BITSO_API_SECRET parece inválido (muy corto)")
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Obtiene cliente HTTP."""

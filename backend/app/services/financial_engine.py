@@ -3,11 +3,15 @@ Motor de Evaluacion Financiera.
 Calcula VAN, TIR, ROI, Payback, Indice de Rentabilidad.
 Precision financiera con Decimal y numpy_financial.
 """
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+import decimal
+import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 import numpy as np
 import numpy_financial as npf
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,7 +105,9 @@ class FinancialEngine:
                 FinancialEngine.PRECISION_TASA,
                 rounding=ROUND_HALF_UP
             )
-        except Exception:
+        except (ValueError, FloatingPointError, decimal.InvalidOperation) as e:
+            # IRR puede fallar si los flujos no tienen solución convergente
+            logger.debug(f"No se pudo calcular TIR: {e}")
             return None
 
     @staticmethod

@@ -187,8 +187,8 @@ class SlitherAuditService:
         Returns:
             Diccionario con resultados de auditoria
         """
-        # Verificar cache
-        cache_key = hashlib.md5(contract_path.encode()).hexdigest()
+        # Verificar cache (MD5 solo para cache key, no para seguridad)
+        cache_key = hashlib.md5(contract_path.encode(), usedforsecurity=False).hexdigest()
         if cache_key in self._audit_cache:
             cached = self._audit_cache[cache_key]
             # Cache valido por 1 hora
@@ -231,10 +231,44 @@ class SlitherAuditService:
         return audit_result
 
     async def _run_slither(self, contract_path: str) -> dict:
-        """Ejecuta Slither en el contrato."""
+        """
+        Ejecuta Slither en el contrato.
+
+        Security: Valida que el path sea seguro antes de ejecutar.
+        """
+        # Validar path para prevenir path traversal
+        import re
+
+        # Normalizar y resolver el path absoluto
+        resolved_path = os.path.realpath(contract_path)
+
+        # Verificar que sea un archivo .sol
+        if not resolved_path.endswith('.sol'):
+            raise ValueError("Solo se permiten archivos .sol")
+
+        # Verificar que el archivo existe
+        if not os.path.isfile(resolved_path):
+            raise FileNotFoundError(f"Contrato no encontrado: {contract_path}")
+
+        # Verificar que esté dentro de directorios permitidos
+        allowed_dirs = [
+            os.path.realpath("./contracts"),
+            os.path.realpath("/tmp/contracts"),
+            os.path.realpath(os.path.expanduser("~/contracts")),
+        ]
+
+        is_allowed = any(resolved_path.startswith(d) for d in allowed_dirs if os.path.exists(d))
+        if not is_allowed:
+            raise PermissionError(f"Path no permitido: {contract_path}")
+
+        # Sanitizar: no permitir caracteres especiales en el nombre
+        basename = os.path.basename(resolved_path)
+        if not re.match(r'^[\w\-\.]+\.sol$', basename):
+            raise ValueError(f"Nombre de archivo inválido: {basename}")
+
         cmd = [
             self._slither_path,
-            contract_path,
+            resolved_path,  # Usar path resuelto
             "--json", "-"
         ]
 

@@ -9,10 +9,14 @@ Proporciona:
 """
 from typing import List, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
 import asyncio
 import json
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -644,7 +648,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
 
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
 
     finally:
         manager.disconnect(websocket)

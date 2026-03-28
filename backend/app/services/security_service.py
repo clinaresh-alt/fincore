@@ -808,7 +808,8 @@ class SecurityService:
                         data = await response.json()
                         return data.get("data", {}).get("metadata", {}).get("version", 0)
                     return 0
-        except:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) as e:
+            logger.debug(f"Error obteniendo versión de secreto Vault: {e}")
             return 0
 
     async def _update_vault_secret(self, secret_name: str, value: str) -> bool:

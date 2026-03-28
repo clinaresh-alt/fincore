@@ -13,6 +13,7 @@ Basado en NIST SP 800-61 y mejores prácticas de seguridad blockchain.
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -20,6 +21,8 @@ from dataclasses import dataclass, field
 import hashlib
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from app.services.audit.monitoring_service import (
     Alert,
@@ -449,7 +452,7 @@ class IncidentResponseService:
                 else:
                     handler(incident)
             except Exception as e:
-                print(f"Error en incident handler: {e}")
+                logger.error(f"Error en incident handler: {e}")
 
         # Auto-contain para SEV1
         if severity == IncidentSeverity.SEV1 and self.auto_contain_sev1:
@@ -627,7 +630,7 @@ class IncidentResponseService:
             contacts = self.emergency_contacts.get("security_team", [])
 
         # TODO: Implementar notificaciones reales (email, Slack, PagerDuty, etc.)
-        print(f"[IRP] Notificando sobre incidente {incident.id} a: {contacts}")
+        logger.info(f"[IRP] Notificando sobre incidente {incident.id} a: {contacts}")
 
     async def resolve_incident(
         self,

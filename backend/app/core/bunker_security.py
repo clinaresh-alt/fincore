@@ -15,10 +15,13 @@ import hashlib
 import hmac
 import secrets
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from functools import lru_cache
 import base64
+
+logger = logging.getLogger(__name__)
 
 # Libsodium (PyNaCl) para cifrado de alta seguridad
 try:
@@ -31,7 +34,7 @@ try:
     NACL_AVAILABLE = True
 except ImportError:
     NACL_AVAILABLE = False
-    print("WARNING: PyNaCl not installed. Using fallback encryption.")
+    logger.warning("PyNaCl not installed. Using fallback encryption.")
 
 # HashiCorp Vault
 try:
@@ -39,7 +42,7 @@ try:
     VAULT_AVAILABLE = True
 except ImportError:
     VAULT_AVAILABLE = False
-    print("WARNING: hvac not installed. Vault integration disabled.")
+    logger.warning("hvac not installed. Vault integration disabled.")
 
 from app.core.config import settings
 
@@ -227,7 +230,7 @@ class VaultClient:
             secret = self.client.secrets.kv.v2.read_secret_version(path=path)
             return secret['data']['data']
         except Exception as e:
-            print(f"Vault error getting secret: {e}")
+            logger.error(f"Vault error getting secret: {e}")
             return None
 
     def create_dynamic_db_credential(self) -> Optional[Dict]:
@@ -248,7 +251,7 @@ class VaultClient:
                 "lease_id": cred['lease_id']
             }
         except Exception as e:
-            print(f"Vault error creating DB credential: {e}")
+            logger.error(f"Vault error creating DB credential: {e}")
             return None
 
     def get_service_token(self, service_name: str, ttl: str = "1h") -> Optional[str]:
@@ -274,7 +277,7 @@ class VaultClient:
             )
             return token['auth']['client_token']
         except Exception as e:
-            print(f"Vault error creating service token: {e}")
+            logger.error(f"Vault error creating service token: {e}")
             return None
 
 
@@ -441,7 +444,7 @@ class ZeroTrustAuth:
             return True, payload
 
         except Exception as e:
-            print(f"Token verification error: {e}")
+            logger.error(f"Token verification error: {e}")
             return False, None
 
     def create_request_context(

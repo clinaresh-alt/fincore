@@ -87,7 +87,7 @@ class SlitherAuditService:
 
         if not report.passed:
             for vuln in report.vulnerabilities:
-                print(f"[{vuln.severity}] {vuln.description}")
+                logger.warning(f"[{vuln.severity}] {vuln.description}")
     """
 
     # Mapeo de detectores críticos para Fintech

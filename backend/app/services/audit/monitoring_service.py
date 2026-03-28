@@ -10,6 +10,7 @@ Integración con:
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -18,6 +19,8 @@ from dataclasses import dataclass, field
 
 import httpx
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 
@@ -189,7 +192,7 @@ class TransactionMonitoringService:
                 else:
                     handler(alert)
             except Exception as e:
-                print(f"Error en alert handler: {e}")
+                logger.error(f"Error en alert handler: {e}")
 
         # Enviar webhook si está configurado
         for rule in self.rules.values():
@@ -213,7 +216,7 @@ class TransactionMonitoringService:
                 }
                 await client.post(url, json=payload, timeout=10)
         except Exception as e:
-            print(f"Error enviando webhook: {e}")
+            logger.error(f"Error enviando webhook: {e}")
 
     async def analyze_transaction(
         self,
@@ -624,7 +627,7 @@ class TransactionMonitoringService:
                 data = response.json()
                 return data.get("data", {}).get("alerts", {}).get("alerts", [])
         except Exception as e:
-            print(f"Error fetching Forta alerts: {e}")
+            logger.error(f"Error fetching Forta alerts: {e}")
             return []
 
     # ============ Estadísticas ============

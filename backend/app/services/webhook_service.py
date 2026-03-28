@@ -29,7 +29,7 @@ Uso:
     # Registrar endpoint externo
     webhook_service.register_endpoint(
         url="https://api.partner.com/webhooks",
-        secret="shared_secret",
+        secret=os.getenv("PARTNER_WEBHOOK_SECRET"),  # Nunca hardcodear secrets
         events=["remittance.*"],
     )
 """
@@ -75,8 +75,16 @@ WEBHOOK_RETRY_DELAY = int(os.getenv("WEBHOOK_RETRY_DELAY", "5"))  # segundos
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 WEBHOOK_CHANNEL = "fincore:webhooks"
 
-# Secret para firmar webhooks
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "fincore-webhook-secret-change-me")
+# Secret para firmar webhooks - DEBE configurarse en producción
+_webhook_secret = os.getenv("WEBHOOK_SECRET")
+if not _webhook_secret:
+    logger.warning(
+        "⚠️ WEBHOOK_SECRET no configurado. "
+        "Usando secret temporal aleatorio. Los webhooks firmados no serán verificables después de reiniciar."
+    )
+    import secrets as _secrets
+    _webhook_secret = _secrets.token_urlsafe(32)
+WEBHOOK_SECRET = _webhook_secret
 
 
 # ==================== Métricas Prometheus ====================

@@ -39,6 +39,8 @@ from app.models.bank_account import (
 )
 from app.services.blockchain_service import BlockchainService, TransactionResult
 from app.services.notification_service import NotificationService
+from app.services.alert_service import get_alert_service
+from app.schemas.dashboard import AlertType, AlertSeverity
 from app.models.blockchain import BlockchainNetwork
 
 logger = logging.getLogger(__name__)
@@ -955,26 +957,68 @@ class ReconciliationService:
         discrepancy: Dict[str, Any],
         log: ReconciliationLog
     ):
-        """Envia alerta critica."""
+        """Envia alerta critica via AlertService (Slack, PagerDuty, email)."""
         logger.critical(
             f"ALERTA CRITICA - Discrepancia de conciliacion: "
             f"tipo={discrepancy.get('type')}, "
             f"diferencia={discrepancy.get('difference', 'N/A')}"
         )
-        # TODO: Integrar con sistema de alertas (Slack, PagerDuty, email)
+
+        # Integrar con sistema de alertas
+        try:
+            alert_service = get_alert_service()
+            await alert_service.trigger_alert(
+                alert_type=AlertType.RECONCILIATION_DISCREPANCY,
+                severity=AlertSeverity.CRITICAL,
+                title=f"Discrepancia Crítica en Conciliación",
+                message=(
+                    f"Se detectó una discrepancia crítica de tipo '{discrepancy.get('type')}' "
+                    f"con diferencia de {discrepancy.get('difference', 'N/A')}. "
+                    f"Requiere revisión inmediata."
+                ),
+                details={
+                    "reconciliation_id": str(log.id),
+                    "discrepancy_type": discrepancy.get("type"),
+                    "difference": str(discrepancy.get("difference", "")),
+                    "ledger_balance": str(discrepancy.get("ledger_balance", "")),
+                    "onchain_balance": str(discrepancy.get("onchain_balance", "")),
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.error(f"Error enviando alerta crítica: {e}")
 
     async def _send_warning_alert(
         self,
         discrepancy: Dict[str, Any],
         log: ReconciliationLog
     ):
-        """Envia alerta de warning."""
+        """Envia alerta de warning via AlertService."""
         logger.warning(
             f"ALERTA WARNING - Discrepancia de conciliacion: "
             f"tipo={discrepancy.get('type')}, "
             f"detalles={discrepancy}"
         )
-        # TODO: Integrar con sistema de notificaciones
+
+        # Integrar con sistema de notificaciones
+        try:
+            alert_service = get_alert_service()
+            await alert_service.trigger_alert(
+                alert_type=AlertType.RECONCILIATION_DISCREPANCY,
+                severity=AlertSeverity.HIGH,
+                title=f"Discrepancia en Conciliación",
+                message=(
+                    f"Se detectó una discrepancia de tipo '{discrepancy.get('type')}'. "
+                    f"Revisar detalles para determinar acción."
+                ),
+                details={
+                    "reconciliation_id": str(log.id),
+                    "discrepancy": discrepancy,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
+        except Exception as e:
+            logger.error(f"Error enviando alerta warning: {e}")
 
     # ============ Consultas ============
 

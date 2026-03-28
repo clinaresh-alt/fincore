@@ -330,7 +330,8 @@ class ReportingService:
     def _generate_reference_number(self, report_type: ReportType) -> str:
         """Genera numero de referencia unico."""
         timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        random_suffix = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()[:6].upper()
+        # MD5 solo para generar sufijo aleatorio, no para seguridad
+        random_suffix = hashlib.md5(str(uuid.uuid4()).encode(), usedforsecurity=False).hexdigest()[:6].upper()
         return f"{self.INSTITUTION_CODE}-{report_type.value.upper()}-{timestamp}-{random_suffix}"
 
     # ============ Report Management ============

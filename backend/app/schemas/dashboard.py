@@ -41,6 +41,9 @@ class AlertType(str, Enum):
     HIGH_VOLUME = "high_volume"
     RATE_DEVIATION = "rate_deviation"
 
+    # Reconciliación
+    RECONCILIATION_DISCREPANCY = "reconciliation.discrepancy"
+
     # Compliance
     COMPLIANCE_ALERT = "compliance.alert"
     SCREENING_FAILED = "screening.failed"

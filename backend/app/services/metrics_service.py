@@ -263,9 +263,25 @@ class MetricsService:
                 rate = await exchange.get_rate_usdc_mxn()
                 if rate:
                     current_rate = rate.rate
-                    # TODO: calcular cambio 24h
-            except Exception:
-                pass
+
+                    # Calcular cambio 24h usando historial de tasas
+                    from app.models.remittance import ExchangeRateHistory, Currency
+                    yesterday = datetime.utcnow() - timedelta(hours=24)
+
+                    rate_24h_ago = self.db.query(ExchangeRateHistory.rate).filter(
+                        and_(
+                            ExchangeRateHistory.currency_from == Currency.USDC,
+                            ExchangeRateHistory.currency_to == Currency.MXN,
+                            ExchangeRateHistory.captured_at <= yesterday,
+                        )
+                    ).order_by(ExchangeRateHistory.captured_at.desc()).first()
+
+                    if rate_24h_ago and rate_24h_ago[0]:
+                        old_rate = Decimal(str(rate_24h_ago[0]))
+                        if old_rate > 0:
+                            rate_change = float((current_rate - old_rate) / old_rate * 100)
+            except Exception as e:
+                logger.debug(f"No se pudo calcular cambio de tasa 24h: {e}")
 
             # Volumen diario
             from app.models.remittance import Remittance, RemittanceStatus
@@ -322,9 +338,9 @@ class MetricsService:
                 completed_jobs=stats.completed_count,
                 failed_jobs=stats.failed_count,
                 dead_letter_jobs=stats.dead_count,
-                avg_wait_time_seconds=0,  # TODO: calcular
+                avg_wait_time_seconds=stats.avg_wait_time_ms / 1000 if stats.avg_wait_time_ms else 0,
                 avg_processing_time_seconds=stats.avg_processing_time_ms / 1000,
-                jobs_per_minute=0,  # TODO: calcular
+                jobs_per_minute=stats.jobs_per_minute,
                 error_rate=stats.error_rate,
                 active_workers=len(await queue.get_active_workers()),
                 jobs_by_type=stats.counts_by_type,
@@ -348,14 +364,22 @@ class MetricsService:
 
             uptime = (datetime.utcnow() - SERVER_START_TIME).total_seconds()
 
+            # Obtener métricas de requests del middleware
+            request_metrics = {"requests_per_second": 0, "avg_response_time_ms": 0, "error_rate": 0}
+            try:
+                from app.main import get_request_metrics
+                request_metrics = get_request_metrics()
+            except ImportError:
+                pass
+
             return SystemMetrics(
                 cpu_usage=cpu,
                 memory_usage=memory.percent,
                 disk_usage=disk.percent,
                 active_connections=len(psutil.net_connections()),
-                requests_per_second=0,  # TODO: de Prometheus
-                avg_response_time_ms=0,  # TODO: de Prometheus
-                error_rate=0,  # TODO: de Prometheus
+                requests_per_second=request_metrics.get("requests_per_second", 0),
+                avg_response_time_ms=request_metrics.get("avg_response_time_ms", 0),
+                error_rate=request_metrics.get("error_rate", 0),
                 uptime_seconds=int(uptime),
             )
 
@@ -494,13 +518,21 @@ class MetricsService:
         """Verifica conexión a blockchain."""
         start = time.time()
         try:
-            # TODO: verificar conexión al nodo
+            from app.services.blockchain_service import get_blockchain_service
+
+            blockchain = get_blockchain_service()
+            # Verificar conexión obteniendo el número de bloque actual
+            loop = asyncio.get_event_loop()
+            block_number = await loop.run_in_executor(
+                None, lambda: blockchain.w3.eth.block_number
+            )
             latency = (time.time() - start) * 1000
 
             return ServiceHealth(
                 name="blockchain",
                 status=ServiceStatus.HEALTHY,
                 latency_ms=latency,
+                details={"block_number": block_number}
             )
         except Exception as e:
             latency = (time.time() - start) * 1000

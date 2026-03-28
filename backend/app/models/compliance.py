@@ -538,3 +538,128 @@ class AssetValuation(Base):
     __table_args__ = (
         Index("ix_asset_valuations_asset_date", "asset_id", "valuation_date"),
     )
+
+
+class ScreeningAuditLog(Base):
+    """
+    Registro de auditoría para screening de direcciones blockchain.
+    Cumple con requisitos de PLD/AML para documentar verificaciones on-chain.
+
+    Cada screening realizado a través de Chainalysis, Elliptic u otro proveedor
+    se registra aquí para cumplimiento regulatorio.
+    """
+    __tablename__ = "screening_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    screening_id = Column(String(100), unique=True, nullable=False)
+
+    # Referencias
+    user_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
+    remittance_id = Column(String(100), index=True)
+    transaction_id = Column(UUID(as_uuid=True))
+
+    # Dirección analizada
+    address = Column(String(100), nullable=False, index=True)
+    network = Column(String(50), nullable=False)  # polygon, ethereum, bitcoin
+
+    # Resultado del screening
+    risk_score = Column(Integer, nullable=False)  # 0-100
+    risk_level = Column(SQLEnum(RiskLevel), nullable=False)
+    recommended_action = Column(String(50), nullable=False)  # approve, review, reject, block
+
+    # Indicadores de riesgo detectados
+    risk_indicators = Column(JSON)  # Lista de indicadores con tipo y descripción
+
+    # Información del screening
+    provider = Column(String(50), nullable=False)  # chainalysis, elliptic, internal
+    provider_reference = Column(String(200))  # Referencia del proveedor
+
+    # Montos de la transacción (para reportes)
+    amount_usd = Column(Numeric(precision=18, scale=2))
+    amount_crypto = Column(Numeric(precision=28, scale=18))
+    crypto_symbol = Column(String(20))
+
+    # Decisión tomada
+    decision_action = Column(String(50))  # Acción final tomada
+    decision_reason = Column(Text)
+    requires_sar = Column(Boolean, default=False)  # Requiere reporte SAR
+
+    # Metadata
+    screened_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_screening_audit_address_date", "address", "screened_at"),
+        Index("ix_screening_audit_risk_level", "risk_level"),
+        Index("ix_screening_audit_user", "user_id", "screened_at"),
+    )
+
+
+class SARReport(Base):
+    """
+    Reportes de Actividad Sospechosa (SAR) para CNBV/UIF.
+
+    Generados cuando:
+    - Transacciones >= $10,000 USD
+    - Direcciones con indicadores de terrorismo/ransomware/sanciones
+    - Patrones sospechosos detectados
+    """
+    __tablename__ = "sar_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    reference_number = Column(String(50), unique=True, nullable=False)  # SAR-YYYYMMDD-XXXXX
+
+    # Usuario y transacciones relacionadas
+    user_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
+    remittance_ids = Column(JSON)  # Lista de IDs de remesas incluidas
+    screening_ids = Column(JSON)  # Lista de IDs de screenings relacionados
+
+    # Información del reporte
+    report_type = Column(String(50), default="suspicious_activity")
+    description = Column(Text, nullable=False)
+    total_amount_usd = Column(Numeric(precision=18, scale=2))
+
+    # Indicadores que generaron el reporte
+    triggering_indicators = Column(JSON)
+    risk_assessment = Column(Text)
+
+    # Estado del proceso
+    status = Column(String(50), default="pending")  # pending, review, approved, submitted, confirmed
+    priority = Column(String(20), default="normal")  # low, normal, high, urgent
+
+    # Revisión interna
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
+    reviewed_at = Column(DateTime)
+    review_notes = Column(Text)
+
+    # Aprobación
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
+    approved_at = Column(DateTime)
+    approval_notes = Column(Text)
+
+    # Envío a CNBV/UIF
+    submitted_at = Column(DateTime)
+    uif_confirmation = Column(String(100))
+    uif_response = Column(JSON)
+
+    # Contenido del reporte
+    report_xml = Column(Text)  # XML formateado para UIF
+    report_data = Column(JSON)  # Datos estructurados
+
+    # Fechas
+    incident_date = Column(DateTime)  # Fecha del incidente reportado
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deadline = Column(DateTime)  # Fecha límite para envío
+
+    # Relaciones
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_sar_reports_status", "status"),
+        Index("ix_sar_reports_user_date", "user_id", "created_at"),
+        Index("ix_sar_reports_priority", "priority", "status"),
+    )

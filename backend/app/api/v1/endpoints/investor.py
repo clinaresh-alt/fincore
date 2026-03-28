@@ -52,7 +52,14 @@ async def get_portfolio(
         InvestmentStatus.ACTIVA, InvestmentStatus.EN_RENDIMIENTO
     ])
     completados = sum(1 for i in inversiones if i.estado == InvestmentStatus.LIQUIDADA)
-    defaults = 0  # TODO: calcular desde proyectos en default
+
+    # Calcular proyectos en default: contar inversiones en proyectos con estado DEFAULT
+    proyecto_ids = [i.proyecto_id for i in inversiones]
+    proyectos_default = db.query(Project.id).filter(
+        Project.id.in_(proyecto_ids),
+        Project.estado == ProjectStatus.DEFAULT
+    ).all()
+    defaults = len(proyectos_default)
 
     # MOIC (Multiple on Invested Capital)
     moic = Decimal("1.0")
@@ -60,11 +67,32 @@ async def get_portfolio(
         total_recibido = sum(i.monto_total_recibido for i in inversiones) or Decimal("0")
         moic = ((total_recibido + total_invertido) / total_invertido).quantize(Decimal("0.01"))
 
+    # Calcular TIR ponderada de la cartera
+    # TIR simplificada basada en rendimiento anualizado ponderado
+    tir_cartera = None
+    if total_invertido > 0 and inversiones:
+        tir_sum = Decimal("0")
+        for inv in inversiones:
+            if inv.monto_invertido and inv.monto_invertido > 0:
+                # Calcular tiempo en años desde la inversión
+                tiempo_dias = (datetime.utcnow() - inv.fecha_inversion).days if inv.fecha_inversion else 365
+                tiempo_anios = max(Decimal(str(tiempo_dias)) / Decimal("365"), Decimal("0.1"))
+
+                # Rendimiento de esta inversión
+                rend = inv.monto_rendimiento_acumulado or Decimal("0")
+                tir_inv = (rend / inv.monto_invertido) / tiempo_anios
+
+                # Ponderar por monto invertido
+                peso = inv.monto_invertido / total_invertido
+                tir_sum += tir_inv * peso
+
+        tir_cartera = tir_sum.quantize(Decimal("0.0001"))
+
     kpis = PortfolioKPIs(
         total_invertido=total_invertido,
         rendimiento_total=rendimiento_total,
         rendimiento_porcentual=rendimiento_porcentual,
-        tir_cartera=None,  # TODO: calcular TIR ponderada
+        tir_cartera=tir_cartera,
         moic=moic,
         proyectos_activos=activos,
         proyectos_completados=completados,
@@ -114,12 +142,38 @@ async def get_portfolio(
     # Proximos pagos (simplificado)
     proximos_pagos = []
 
+    # Calcular rendimiento histórico (últimos 12 meses)
+    rendimiento_historico = []
+    if inversiones:
+        from datetime import timedelta
+        from calendar import monthrange
+
+        # Obtener todas las transacciones de rendimiento del usuario
+        inversion_ids = [i.id for i in inversiones]
+        transacciones = db.query(
+            func.date_trunc('month', InvestmentTransaction.fecha).label('mes'),
+            func.sum(InvestmentTransaction.monto).label('total')
+        ).filter(
+            InvestmentTransaction.inversion_id.in_(inversion_ids),
+            InvestmentTransaction.tipo == "Rendimiento",
+            InvestmentTransaction.fecha >= datetime.utcnow() - timedelta(days=365)
+        ).group_by(
+            func.date_trunc('month', InvestmentTransaction.fecha)
+        ).order_by('mes').all()
+
+        for tx in transacciones:
+            if tx.mes and tx.total:
+                rendimiento_historico.append({
+                    "mes": tx.mes.strftime("%Y-%m"),
+                    "rendimiento": float(tx.total)
+                })
+
     return PortfolioResponse(
         kpis=kpis,
         distribucion_sectores=distribucion,
         inversiones=inversiones_response,
         proximos_pagos=proximos_pagos,
-        rendimiento_historico=[]  # TODO: implementar historico
+        rendimiento_historico=rendimiento_historico
     )
 
 

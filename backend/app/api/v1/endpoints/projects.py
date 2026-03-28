@@ -8,7 +8,8 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy import func
 
 from app.core.database import get_db
 from app.api.v1.endpoints.auth import get_current_user, get_current_user_optional, require_role
@@ -829,8 +830,8 @@ async def get_indicators_by_sector(
 async def list_projects_with_evaluations(
     estado: Optional[str] = Query(None, description="Filtrar por estado"),
     sector: Optional[str] = Query(None, description="Filtrar por sector"),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -838,8 +839,15 @@ async def list_projects_with_evaluations(
     Lista proyectos con sus evaluaciones financieras completas.
     Incluye indicadores basicos y sectoriales.
     Para la pagina de evaluaciones.
+
+    Optimizado con eager loading para evitar queries N+1.
     """
-    query = db.query(Project)
+    # Query base con eager loading de relaciones
+    query = db.query(Project).options(
+        joinedload(Project.evaluacion),  # Evaluacion financiera
+        joinedload(Project.analisis_riesgo),  # Analisis de riesgo
+        selectinload(Project.flujos_caja),  # Flujos de caja (puede ser muchos)
+    )
 
     # Filtros opcionales
     if estado:
@@ -847,25 +855,24 @@ async def list_projects_with_evaluations(
     if sector:
         query = query.filter(Project.sector == sector)
 
-    total = query.count()
+    # Conteo total (sin cargar relaciones)
+    total = db.query(func.count(Project.id)).filter(
+        *([Project.estado == estado] if estado else []),
+        *([Project.sector == sector] if sector else [])
+    ).scalar()
+
+    # Paginación
     projects = query.offset(skip).limit(limit).all()
 
     result = []
     for project in projects:
-        # Obtener evaluacion financiera
-        evaluation = db.query(FinancialEvaluation).filter(
-            FinancialEvaluation.proyecto_id == project.id
-        ).first()
-
-        # Obtener analisis de riesgo
-        risk = db.query(RiskAnalysis).filter(
-            RiskAnalysis.proyecto_id == project.id
-        ).first()
-
-        # Obtener flujos de caja
-        cash_flows = db.query(CashFlow).filter(
-            CashFlow.proyecto_id == project.id
-        ).order_by(CashFlow.periodo_nro).all()
+        # Las relaciones ya están cargadas (eager loading)
+        evaluation = project.evaluacion if hasattr(project, 'evaluacion') else None
+        risk = project.analisis_riesgo if hasattr(project, 'analisis_riesgo') else None
+        cash_flows = sorted(
+            project.flujos_caja if hasattr(project, 'flujos_caja') else [],
+            key=lambda cf: cf.periodo_nro
+        )
 
         # Construir respuesta
         project_data = {
@@ -942,29 +949,40 @@ async def list_projects_with_evaluations(
 
         result.append(project_data)
 
-    # Estadisticas generales
-    all_projects = db.query(Project).all()
+    # Estadisticas generales (optimizadas con queries agregadas)
     stats = {
-        "total": len(all_projects),
-        "pendientes": len([p for p in all_projects if p.estado == ProjectStatus.EN_EVALUACION]),
-        "aprobados": len([p for p in all_projects if p.estado == ProjectStatus.APROBADO]),
-        "rechazados": len([p for p in all_projects if p.estado == ProjectStatus.RECHAZADO]),
-        "financiando": len([p for p in all_projects if p.estado == ProjectStatus.FINANCIANDO]),
+        "total": db.query(func.count(Project.id)).scalar(),
+        "pendientes": db.query(func.count(Project.id)).filter(
+            Project.estado == ProjectStatus.EN_EVALUACION
+        ).scalar(),
+        "aprobados": db.query(func.count(Project.id)).filter(
+            Project.estado == ProjectStatus.APROBADO
+        ).scalar(),
+        "rechazados": db.query(func.count(Project.id)).filter(
+            Project.estado == ProjectStatus.RECHAZADO
+        ).scalar(),
+        "financiando": db.query(func.count(Project.id)).filter(
+            Project.estado == ProjectStatus.FINANCIANDO
+        ).scalar(),
         "por_sector": {},
     }
 
-    # Agrupar por sector
-    for p in all_projects:
-        sector_name = p.sector.value if hasattr(p.sector, 'value') else str(p.sector)
-        if sector_name not in stats["por_sector"]:
-            stats["por_sector"][sector_name] = 0
-        stats["por_sector"][sector_name] += 1
+    # Agrupar por sector con query agregada
+    sector_counts = db.query(
+        Project.sector,
+        func.count(Project.id)
+    ).group_by(Project.sector).all()
+
+    for sector, count in sector_counts:
+        sector_name = sector.value if hasattr(sector, 'value') else str(sector)
+        stats["por_sector"][sector_name] = count
 
     return {
         "projects": result,
         "total": total,
         "skip": skip,
         "limit": limit,
+        "has_more": skip + limit < total,
         "stats": stats,
         "all_indicators": FeasibilityAnalyzer.get_all_extended_indicators()
     }

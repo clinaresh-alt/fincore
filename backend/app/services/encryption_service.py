@@ -56,14 +56,18 @@ class EncryptionService:
     @staticmethod
     def _generate_dev_key() -> str:
         """
-        Genera una clave de desarrollo determinística.
-        SOLO para desarrollo local.
+        Genera una clave de desarrollo ALEATORIA.
+        ADVERTENCIA: Esta clave cambia en cada reinicio del servicio.
+        Los datos encriptados no podrán ser recuperados después de reiniciar.
+        SOLO para desarrollo local - NO USAR EN PRODUCCIÓN.
         """
-        # Usar un valor fijo para desarrollo (en producción esto DEBE venir de KMS)
-        dev_secret = "fincore-dev-secret-key-2024-do-not-use-in-prod"
-        return base64.urlsafe_b64encode(
-            hashlib.sha256(dev_secret.encode()).digest()
-        ).decode()
+        logger.warning(
+            "⚠️ SEGURIDAD: Generando clave de encriptación temporal aleatoria. "
+            "Los datos encriptados se perderán al reiniciar el servicio. "
+            "Configure ENCRYPTION_MASTER_KEY para persistencia."
+        )
+        # Generar clave aleatoria segura (NO determinística)
+        return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
 
     @staticmethod
     def generate_master_key() -> str:
@@ -76,12 +80,14 @@ class EncryptionService:
         """
         return Fernet.generate_key().decode()
 
-    def _create_fernet(self, master_key: str) -> Fernet:
+    def _create_fernet(self, master_key: str, salt: Optional[bytes] = None) -> Fernet:
         """
         Crea una instancia de Fernet a partir de la master key.
 
         Args:
             master_key: Clave en formato base64.
+            salt: Salt para derivación PBKDF2. Si no se proporciona, se genera uno
+                  basado en el hash de la master key (determinístico pero único por key).
 
         Returns:
             Instancia de Fernet.
@@ -91,11 +97,17 @@ class EncryptionService:
             if len(master_key) == 44:
                 return Fernet(master_key.encode())
 
-            # Si no, derivar una key Fernet usando PBKDF2
+            # Generar salt derivado de la master key si no se proporciona
+            # Esto es determinístico para la misma key, pero único por key
+            if salt is None:
+                # Usar los primeros 16 bytes del hash SHA-256 de la key como salt
+                salt = hashlib.sha256(f"fincore-salt-{master_key}".encode()).digest()[:16]
+
+            # Derivar una key Fernet usando PBKDF2 con salt dinámico
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
-                salt=b"fincore-salt-v1",  # Salt fijo (la seguridad viene de la master key)
+                salt=salt,
                 iterations=100000,
             )
             key = base64.urlsafe_b64encode(

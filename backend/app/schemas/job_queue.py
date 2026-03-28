@@ -350,6 +350,7 @@ class QueueStats(BaseModel):
 
     # Metricas de rendimiento
     avg_processing_time_ms: float = 0
+    avg_wait_time_ms: float = 0  # Tiempo promedio de espera en cola
     jobs_per_minute: float = 0
     error_rate: float = 0
 

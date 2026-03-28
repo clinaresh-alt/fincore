@@ -3,8 +3,40 @@ Configuracion central del sistema financiero FinCore.
 Seguridad de grado bancario con cifrado AES-256.
 """
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import List, Optional
 import secrets
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+
+def _get_jwt_secret() -> str:
+    """
+    Obtiene JWT_SECRET_KEY de variables de entorno.
+    En desarrollo genera una clave temporal con advertencia.
+    """
+    secret = os.getenv("JWT_SECRET_KEY")
+    if secret:
+        if len(secret) < 32:
+            raise ValueError("JWT_SECRET_KEY debe tener al menos 32 caracteres")
+        return secret
+
+    # Solo permitir generación dinámica en desarrollo
+    debug_mode = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+    if not debug_mode:
+        raise ValueError(
+            "JWT_SECRET_KEY es OBLIGATORIO en producción. "
+            "Configure la variable de entorno JWT_SECRET_KEY con al menos 32 caracteres."
+        )
+
+    # Modo desarrollo: generar clave temporal
+    logger.warning(
+        "⚠️ JWT_SECRET_KEY no configurado. Usando clave temporal. "
+        "Las sesiones se invalidarán al reiniciar. NO USAR EN PRODUCCIÓN."
+    )
+    return secrets.token_urlsafe(32)
 
 
 class Settings(BaseSettings):
@@ -30,11 +62,17 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
 
-    # JWT Configuration
-    JWT_SECRET_KEY: str = secrets.token_urlsafe(32)
+    # JWT Configuration - DEBE configurarse en producción
+    JWT_SECRET_KEY: str = ""  # Se valida en __init__
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 480  # 8 horas de trabajo
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30  # Reducido de 480 a 30 minutos (más seguro)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    def __init__(self, **kwargs):
+        # Pre-cargar JWT_SECRET_KEY si no se proporciona
+        if "JWT_SECRET_KEY" not in kwargs or not kwargs["JWT_SECRET_KEY"]:
+            kwargs["JWT_SECRET_KEY"] = _get_jwt_secret()
+        super().__init__(**kwargs)
 
     # MFA Configuration
     MFA_ISSUER_NAME: str = "FinCore"

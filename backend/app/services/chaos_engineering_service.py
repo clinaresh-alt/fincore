@@ -337,7 +337,8 @@ class SteadyStateValidator:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
                     return response.status == expected_status
-        except:
+        except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) as e:
+            logger.debug(f"Validación de endpoint falló ({url}): {e}")
             return False
 
     @staticmethod

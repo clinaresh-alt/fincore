@@ -2,7 +2,8 @@
 Motor de Calculo de Indicadores Sectoriales.
 Calcula metricas especificas por sector de proyecto.
 """
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+import decimal
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 
@@ -13,7 +14,7 @@ def safe_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
         return default
     try:
         return Decimal(str(value))
-    except:
+    except (ValueError, TypeError, decimal.InvalidOperation):
         return default
 
 

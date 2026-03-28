@@ -42,16 +42,31 @@ type ServiceTokenClaims struct {
 	TokenID     string   `json:"token_id"`
 }
 
+// ErrMissingSecretKey indica que SECRET_KEY no está configurada
+var ErrMissingSecretKey = errors.New("SECRET_KEY environment variable is required")
+
+// ErrMissingEncryptionKey indica que ENCRYPTION_KEY no está configurada
+var ErrMissingEncryptionKey = errors.New("ENCRYPTION_KEY environment variable is required")
+
 // NewSecurityManager crea una nueva instancia del manager de seguridad
-func NewSecurityManager() *SecurityManager {
+// IMPORTANTE: Requiere SECRET_KEY y ENCRYPTION_KEY en variables de entorno
+func NewSecurityManager() (*SecurityManager, error) {
 	secretKey := os.Getenv("SECRET_KEY")
 	if secretKey == "" {
-		secretKey = "fincore-default-key-change-in-production"
+		return nil, ErrMissingSecretKey
 	}
 
 	encryptKey := os.Getenv("ENCRYPTION_KEY")
 	if encryptKey == "" {
-		encryptKey = "fincore-encrypt-key-32-bytes-ok!"
+		return nil, ErrMissingEncryptionKey
+	}
+
+	// Validar longitud mínima de las claves (32 caracteres)
+	if len(secretKey) < 32 {
+		return nil, errors.New("SECRET_KEY must be at least 32 characters")
+	}
+	if len(encryptKey) < 32 {
+		return nil, errors.New("ENCRYPTION_KEY must be at least 32 characters")
 	}
 
 	// Derivar clave de 32 bytes
@@ -63,7 +78,17 @@ func NewSecurityManager() *SecurityManager {
 		secretKey:    []byte(secretKey),
 		encryptKey:   key,
 		vaultEnabled: os.Getenv("VAULT_ADDR") != "",
+	}, nil
+}
+
+// MustNewSecurityManager crea un SecurityManager o hace panic si falla
+// Usar solo en inicialización de la aplicación
+func MustNewSecurityManager() *SecurityManager {
+	sm, err := NewSecurityManager()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to initialize SecurityManager: %v", err))
 	}
+	return sm
 }
 
 // GenerateRequestID genera un ID único para cada request

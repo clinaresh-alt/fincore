@@ -532,32 +532,47 @@ class ComplianceScreeningService:
         """
         Persiste el resultado de screening en la base de datos.
 
-        Guarda en tabla de auditoria para cumplimiento regulatorio.
+        Guarda en tabla ScreeningAuditLog para cumplimiento regulatorio PLD/AML.
         """
-        # TODO: Crear modelo ScreeningAuditLog y persistir
-        # Por ahora, solo logear
-        logger.info(
-            f"Screening audit: remittance={remittance_id}, "
-            f"user={user_id}, address={screening_result.address[:10]}..., "
-            f"score={screening_result.risk_score}, action={screening_result.recommended_action.value}"
-        )
+        from app.models.compliance import ScreeningAuditLog, RiskLevel as ComplianceRiskLevel
 
-        # En produccion, guardar en tabla de auditoria:
-        # audit_log = ScreeningAuditLog(
-        #     screening_id=screening_result.screening_id,
-        #     remittance_id=remittance_id,
-        #     user_id=user_id,
-        #     address=screening_result.address,
-        #     network=screening_result.network.value,
-        #     risk_score=screening_result.risk_score,
-        #     risk_level=screening_result.risk_level.value,
-        #     action=screening_result.recommended_action.value,
-        #     indicators=json.dumps([ind.dict() for ind in screening_result.risk_indicators]),
-        #     amount_usd=amount_usd,
-        #     screened_at=screening_result.screened_at,
-        # )
-        # self.db.add(audit_log)
-        # self.db.commit()
+        try:
+            # Mapear risk_level al enum de compliance
+            risk_level_map = {
+                "low": ComplianceRiskLevel.LOW,
+                "medium": ComplianceRiskLevel.MEDIUM,
+                "high": ComplianceRiskLevel.HIGH,
+                "critical": ComplianceRiskLevel.PROHIBITED,
+            }
+
+            audit_log = ScreeningAuditLog(
+                screening_id=screening_result.screening_id,
+                user_id=user_id,
+                remittance_id=remittance_id,
+                address=screening_result.address,
+                network=screening_result.network.value if hasattr(screening_result.network, 'value') else str(screening_result.network),
+                risk_score=screening_result.risk_score,
+                risk_level=risk_level_map.get(screening_result.risk_level.value.lower(), ComplianceRiskLevel.MEDIUM),
+                recommended_action=screening_result.recommended_action.value,
+                risk_indicators=[ind.dict() if hasattr(ind, 'dict') else ind for ind in screening_result.risk_indicators],
+                provider="chainalysis",  # O el proveedor usado
+                amount_usd=amount_usd,
+                screened_at=screening_result.screened_at,
+                requires_sar=screening_result.risk_score >= 70 or amount_usd >= Decimal("10000"),
+            )
+
+            self.db.add(audit_log)
+            self.db.commit()
+
+            logger.info(
+                f"Screening audit persisted: screening_id={screening_result.screening_id}, "
+                f"remittance={remittance_id}, risk_score={screening_result.risk_score}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error persisting screening audit: {e}")
+            self.db.rollback()
+            # No lanzar excepción - el screening ya se realizó
 
     # ============ Alertas ============
 
@@ -614,24 +629,98 @@ class ComplianceScreeningService:
         user_id: str,
     ):
         """
-        Encola generacion de reporte SAR para CNBV.
+        Encola generacion de reporte SAR para CNBV/UIF.
 
         Los reportes SAR deben generarse para:
         - Transacciones >= $10,000 USD
         - Direcciones con indicadores de terrorismo/ransomware/sanciones
         - Patrones sospechosos detectados
-        """
-        logger.info(
-            f"SAR report queued: remittance={remittance_id}, "
-            f"screening={screening_result.screening_id}"
-        )
 
-        # TODO: Implementar cola de reportes SAR
-        # Esto deberia:
-        # 1. Agregar a tabla sar_reports con status=PENDING
-        # 2. Job en background genera el reporte
-        # 3. Revision manual antes de enviar a CNBV
-        # 4. Envio via API de CNBV o portal
+        El flujo es:
+        1. Se crea el reporte con status=pending
+        2. Un analista de compliance lo revisa
+        3. Se aprueba y se genera el XML para UIF
+        4. Se envía manualmente o vía API
+        """
+        from app.models.compliance import SARReport
+        from datetime import datetime, timedelta
+
+        try:
+            # Generar número de referencia único
+            date_str = datetime.utcnow().strftime("%Y%m%d")
+            existing_count = self.db.query(SARReport).filter(
+                SARReport.reference_number.like(f"SAR-{date_str}%")
+            ).count()
+            reference_number = f"SAR-{date_str}-{(existing_count + 1):05d}"
+
+            # Determinar prioridad basada en indicadores
+            priority = "normal"
+            high_risk_indicators = ["terrorism", "ransomware", "sanctions", "child_exploitation"]
+            for indicator in screening_result.risk_indicators:
+                indicator_type = indicator.indicator_type if hasattr(indicator, 'indicator_type') else indicator.get('indicator_type', '')
+                if indicator_type.lower() in high_risk_indicators:
+                    priority = "urgent"
+                    break
+                elif indicator_type.lower() in ["mixer", "darknet", "fraud"]:
+                    priority = "high"
+
+            # Crear descripción del reporte
+            description = (
+                f"Actividad sospechosa detectada en remesa {remittance_id}. "
+                f"Dirección blockchain: {screening_result.address[:20]}... "
+                f"Score de riesgo: {screening_result.risk_score}/100. "
+                f"Indicadores detectados: {len(screening_result.risk_indicators)}."
+            )
+
+            sar_report = SARReport(
+                reference_number=reference_number,
+                user_id=user_id,
+                remittance_ids=[remittance_id],
+                screening_ids=[screening_result.screening_id],
+                report_type="suspicious_activity",
+                description=description,
+                triggering_indicators=[
+                    ind.dict() if hasattr(ind, 'dict') else ind
+                    for ind in screening_result.risk_indicators
+                ],
+                risk_assessment=(
+                    f"Score: {screening_result.risk_score}. "
+                    f"Nivel: {screening_result.risk_level.value}. "
+                    f"Acción recomendada: {screening_result.recommended_action.value}."
+                ),
+                status="pending",
+                priority=priority,
+                incident_date=datetime.utcnow(),
+                deadline=datetime.utcnow() + timedelta(hours=24 if priority == "urgent" else 72),
+            )
+
+            self.db.add(sar_report)
+            self.db.commit()
+
+            logger.warning(
+                f"SAR report created: {reference_number}, "
+                f"priority={priority}, remittance={remittance_id}"
+            )
+
+            # Notificar a compliance si es urgente
+            if priority == "urgent" and self.notifications:
+                try:
+                    await self.notifications.send_compliance_alert(
+                        alert_type="sar_urgent",
+                        severity="critical",
+                        message=f"SAR urgente creado: {reference_number}",
+                        metadata={
+                            "reference_number": reference_number,
+                            "remittance_id": remittance_id,
+                            "risk_score": screening_result.risk_score,
+                        }
+                    )
+                except Exception as e:
+                    logger.error(f"Error notificando SAR urgente: {e}")
+
+        except Exception as e:
+            logger.error(f"Error creating SAR report: {e}")
+            self.db.rollback()
 
     async def generate_sar_report(
         self,
@@ -679,23 +768,116 @@ class ComplianceScreeningService:
     ) -> ScreeningStats:
         """
         Obtiene estadisticas de screening para un periodo.
+        Utiliza la tabla ScreeningAuditLog para métricas de compliance.
         """
-        # TODO: Implementar queries a tabla de auditoria
+        from app.models.compliance import ScreeningAuditLog, RiskLevel as ComplianceRiskLevel
 
-        return ScreeningStats(
-            period_start=period_start,
-            period_end=period_end,
-            total_screenings=0,
-            approved=0,
-            rejected=0,
-            blocked=0,
-            pending_review=0,
-            average_risk_score=0.0,
-            high_risk_percentage=0.0,
-            by_category={},
-            by_network={},
-            average_screening_time_ms=0.0,
-        )
+        try:
+            # Query base para el periodo
+            base_query = self.db.query(ScreeningAuditLog).filter(
+                and_(
+                    ScreeningAuditLog.screened_at >= period_start,
+                    ScreeningAuditLog.screened_at <= period_end
+                )
+            )
+
+            # Conteos totales
+            total_screenings = base_query.count()
+
+            # Conteos por acción recomendada
+            approved = base_query.filter(
+                ScreeningAuditLog.recommended_action == "approve"
+            ).count()
+            rejected = base_query.filter(
+                ScreeningAuditLog.recommended_action == "reject"
+            ).count()
+            blocked = base_query.filter(
+                ScreeningAuditLog.recommended_action == "block"
+            ).count()
+            pending_review = base_query.filter(
+                ScreeningAuditLog.recommended_action == "review"
+            ).count()
+
+            # Score promedio
+            avg_score_result = self.db.query(
+                func.avg(ScreeningAuditLog.risk_score)
+            ).filter(
+                and_(
+                    ScreeningAuditLog.screened_at >= period_start,
+                    ScreeningAuditLog.screened_at <= period_end
+                )
+            ).scalar()
+            average_risk_score = float(avg_score_result or 0)
+
+            # Porcentaje de alto riesgo
+            high_risk_count = base_query.filter(
+                ScreeningAuditLog.risk_level.in_([
+                    ComplianceRiskLevel.HIGH,
+                    ComplianceRiskLevel.PROHIBITED
+                ])
+            ).count()
+            high_risk_percentage = (
+                (high_risk_count / total_screenings * 100)
+                if total_screenings > 0 else 0.0
+            )
+
+            # Distribución por red
+            by_network_query = self.db.query(
+                ScreeningAuditLog.network,
+                func.count(ScreeningAuditLog.id)
+            ).filter(
+                and_(
+                    ScreeningAuditLog.screened_at >= period_start,
+                    ScreeningAuditLog.screened_at <= period_end
+                )
+            ).group_by(ScreeningAuditLog.network).all()
+
+            by_network = {row[0]: row[1] for row in by_network_query}
+
+            # Distribución por nivel de riesgo (como categoría)
+            by_risk_query = self.db.query(
+                ScreeningAuditLog.risk_level,
+                func.count(ScreeningAuditLog.id)
+            ).filter(
+                and_(
+                    ScreeningAuditLog.screened_at >= period_start,
+                    ScreeningAuditLog.screened_at <= period_end
+                )
+            ).group_by(ScreeningAuditLog.risk_level).all()
+
+            by_category = {str(row[0].value): row[1] for row in by_risk_query if row[0]}
+
+            return ScreeningStats(
+                period_start=period_start,
+                period_end=period_end,
+                total_screenings=total_screenings,
+                approved=approved,
+                rejected=rejected,
+                blocked=blocked,
+                pending_review=pending_review,
+                average_risk_score=average_risk_score,
+                high_risk_percentage=high_risk_percentage,
+                by_category=by_category,
+                by_network=by_network,
+                average_screening_time_ms=0.0,  # No disponible sin métricas de tiempo
+            )
+
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas de screening: {e}")
+            return ScreeningStats(
+                period_start=period_start,
+                period_end=period_end,
+                total_screenings=0,
+                approved=0,
+                rejected=0,
+                blocked=0,
+                pending_review=0,
+                average_risk_score=0.0,
+                high_risk_percentage=0.0,
+                by_category={},
+                by_network={},
+                average_screening_time_ms=0.0,
+            )
 
 
 # ============ DTOs Internos ============

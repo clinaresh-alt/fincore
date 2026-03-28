@@ -158,25 +158,104 @@ async def get_operator_user(
     return current_user
 
 
-def verify_stp_webhook_signature(
+async def verify_stp_webhook_signature(
     request: Request,
     x_stp_signature: Optional[str] = Header(None, alias="X-STP-Signature"),
+    x_stp_timestamp: Optional[str] = Header(None, alias="X-STP-Timestamp"),
 ) -> bool:
     """
-    Verifica la firma del webhook de STP.
+    Verifica la firma del webhook de STP usando HMAC-SHA256.
 
-    STP firma los webhooks con HMAC-SHA256 usando el secret compartido.
+    STP firma los webhooks de la siguiente manera:
+    1. Concatena: timestamp + "." + body
+    2. Calcula HMAC-SHA256 con el secret compartido
+    3. Envía la firma en el header X-STP-Signature
+
+    También verifica que el timestamp no sea muy antiguo (replay attack).
     """
+    webhook_secret = getattr(settings, 'STP_WEBHOOK_SECRET', '')
+
+    # Si no hay secret configurado, solo aceptar en desarrollo
+    if not webhook_secret:
+        if settings.DEBUG:
+            logger.warning(
+                "⚠️ STP_WEBHOOK_SECRET no configurado. "
+                "Aceptando webhook sin verificación (solo desarrollo)."
+            )
+            return True
+        else:
+            logger.error("STP_WEBHOOK_SECRET no configurado en producción. Rechazando webhook.")
+            return False
+
+    # Verificar que la firma esté presente
     if not x_stp_signature:
+        logger.warning("Webhook STP recibido sin firma X-STP-Signature")
         return False
 
-    webhook_secret = getattr(settings, 'STP_WEBHOOK_SECRET', '')
-    if not webhook_secret:
-        logger.warning("STP_WEBHOOK_SECRET no configurado, aceptando webhook sin verificacion")
-        return True
+    # Obtener el body del request
+    try:
+        body = await request.body()
+        body_str = body.decode('utf-8')
+    except Exception as e:
+        logger.error(f"Error leyendo body del webhook: {e}")
+        return False
 
-    # TODO: Implementar verificacion de firma real cuando se tenga el formato de STP
+    # Verificar timestamp para prevenir replay attacks (si está presente)
+    if x_stp_timestamp:
+        try:
+            webhook_time = datetime.fromisoformat(x_stp_timestamp.replace('Z', '+00:00'))
+            now = datetime.now(webhook_time.tzinfo) if webhook_time.tzinfo else datetime.now()
+            time_diff = abs((now - webhook_time).total_seconds())
+
+            # Rechazar si el webhook tiene más de 5 minutos de antigüedad
+            if time_diff > 300:
+                logger.warning(
+                    f"Webhook STP rechazado por timestamp antiguo: {time_diff} segundos"
+                )
+                return False
+
+            # Calcular firma esperada con timestamp
+            payload = f"{x_stp_timestamp}.{body_str}"
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error parseando timestamp de webhook STP: {e}")
+            # Si no se puede parsear el timestamp, usar solo el body
+            payload = body_str
+    else:
+        # Sin timestamp, usar solo el body
+        payload = body_str
+
+    # Calcular la firma esperada con HMAC-SHA256
+    expected_signature = hmac.new(
+        webhook_secret.encode('utf-8'),
+        payload.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    # Comparación segura contra timing attacks
+    signature_valid = hmac.compare_digest(
+        x_stp_signature.lower(),
+        expected_signature.lower()
+    )
+
+    if not signature_valid:
+        logger.warning(
+            f"Firma de webhook STP inválida. "
+            f"Recibida: {x_stp_signature[:16]}... "
+            f"Esperada: {expected_signature[:16]}..."
+        )
+        return False
+
+    logger.debug("Firma de webhook STP verificada correctamente")
     return True
+
+
+class STPSignatureError(HTTPException):
+    """Error cuando la firma del webhook STP es inválida."""
+    def __init__(self):
+        super().__init__(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Firma de webhook inválida"
+        )
 
 
 # ============ Endpoints Publicos ============
@@ -394,6 +473,8 @@ async def get_balance(
 async def stp_webhook(
     request: Request,
     db: Session = Depends(get_db),
+    x_stp_signature: Optional[str] = Header(None, alias="X-STP-Signature"),
+    x_stp_timestamp: Optional[str] = Header(None, alias="X-STP-Timestamp"),
 ):
     """
     Webhook para recibir notificaciones de STP.
@@ -404,14 +485,25 @@ async def stp_webhook(
     - Se recibe un deposito entrante
 
     Este endpoint debe estar en whitelist de IPs de STP.
+    La firma HMAC-SHA256 se verifica automáticamente.
     """
-    # Verificar firma (en produccion)
-    # if not verify_stp_webhook_signature(request):
-    #     raise HTTPException(status_code=401, detail="Firma invalida")
+    # Verificar firma del webhook
+    signature_valid = await verify_stp_webhook_signature(
+        request,
+        x_stp_signature,
+        x_stp_timestamp
+    )
+
+    if not signature_valid:
+        logger.warning(
+            f"Webhook STP rechazado por firma inválida. "
+            f"IP: {request.client.host if request.client else 'unknown'}"
+        )
+        raise STPSignatureError()
 
     try:
         body = await request.json()
-        logger.info(f"Webhook STP recibido: {body}")
+        logger.info(f"Webhook STP verificado y recibido: {body}")
 
         # Parsear payload
         payload = STPWebhookPayload(**body)

@@ -293,11 +293,16 @@ class JobQueueService:
         job.started_at = datetime.utcnow()
         job.attempts += 1
 
+        # Calcular y guardar wait time (tiempo en cola)
+        wait_time_ms = (job.started_at - job.created_at).total_seconds() * 1000
+        await self.redis.lpush(f"{STATS_PREFIX}wait_times", wait_time_ms)
+        await self.redis.ltrim(f"{STATS_PREFIX}wait_times", 0, 999)  # Mantener últimos 1000
+
         # Mover a cola de procesamiento
         await self.redis.sadd(QUEUE_PROCESSING, job.id)
         await self._save_job(job)
 
-        logger.info(f"Job {job.id} asignado a worker {worker_id}")
+        logger.info(f"Job {job.id} asignado a worker {worker_id} (wait: {wait_time_ms:.0f}ms)")
         return job
 
     async def _move_scheduled_jobs(self) -> int:
@@ -387,6 +392,33 @@ class JobQueueService:
         processing_time = (job.completed_at - job.started_at).total_seconds() * 1000
         await self.redis.lpush(f"{STATS_PREFIX}processing_times", processing_time)
         await self.redis.ltrim(f"{STATS_PREFIX}processing_times", 0, 999)
+
+        # Actualizar contador de jobs por minuto
+        await self.redis.hincrby(f"{STATS_PREFIX}counters", "jobs_last_minute", 1)
+        last_reset = await self.redis.hget(f"{STATS_PREFIX}counters", "last_minute_reset")
+        if not last_reset:
+            await self.redis.hset(
+                f"{STATS_PREFIX}counters",
+                "last_minute_reset",
+                datetime.utcnow().isoformat()
+            )
+        else:
+            try:
+                reset_time = datetime.fromisoformat(last_reset)
+                if (datetime.utcnow() - reset_time).total_seconds() > 60:
+                    # Reset cada minuto
+                    await self.redis.hset(
+                        f"{STATS_PREFIX}counters",
+                        "jobs_last_minute",
+                        "1"
+                    )
+                    await self.redis.hset(
+                        f"{STATS_PREFIX}counters",
+                        "last_minute_reset",
+                        datetime.utcnow().isoformat()
+                    )
+            except (ValueError, TypeError):
+                pass
 
         logger.info(f"Job {job.id} completado en {processing_time:.0f}ms")
         return True
@@ -600,6 +632,25 @@ class JobQueueService:
             job = await self._load_job(job_id)
             if job:
                 stats.oldest_pending_job = job.created_at
+
+        # Calcular wait times (tiempo promedio de espera en cola)
+        wait_times = await self.redis.lrange(f"{STATS_PREFIX}wait_times", 0, -1)
+        if wait_times:
+            wait_times_float = [float(t) for t in wait_times]
+            # Convertir a QueueMetrics usa seconds, wait_times está en ms
+            stats.avg_wait_time_ms = sum(wait_times_float) / len(wait_times_float)
+
+        # Calcular jobs por minuto (basado en completados en ultimo minuto)
+        jobs_last_minute = int(counters.get("jobs_last_minute", 0))
+        last_minute_reset = counters.get("last_minute_reset")
+        if last_minute_reset:
+            try:
+                reset_time = datetime.fromisoformat(last_minute_reset)
+                elapsed = (datetime.utcnow() - reset_time).total_seconds()
+                if elapsed > 0 and elapsed <= 120:  # Válido si es reciente
+                    stats.jobs_per_minute = jobs_last_minute * (60 / elapsed)
+            except (ValueError, TypeError):
+                pass
 
         return stats
 
