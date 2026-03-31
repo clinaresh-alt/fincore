@@ -343,3 +343,125 @@ class GasEstimateResponse(BaseModel):
     priority_fee_gwei: Decimal
     estimated_cost_native: Decimal
     estimated_cost_usd: Decimal
+
+
+# ==================== WITHDRAWAL SCHEMAS ====================
+
+class WithdrawalRequest(BaseModel):
+    """Solicitud de retiro de crypto."""
+    wallet_id: UUID  # Wallet origen (custodial del usuario)
+    to_address: str = Field(..., min_length=42, max_length=42, pattern=r'^0x[a-fA-F0-9]{40}$')
+    amount: Decimal = Field(..., gt=0)
+    token_address: Optional[str] = Field(
+        default=None,
+        description="Dirección del token ERC-20. None para token nativo (MATIC/ETH)"
+    )
+    network: BlockchainNetworkEnum = BlockchainNetworkEnum.POLYGON
+    mfa_code: Optional[str] = Field(
+        default=None,
+        description="Código MFA requerido para retiros > $100 USD"
+    )
+
+    @field_validator('to_address')
+    @classmethod
+    def lowercase_address(cls, v):
+        return v.lower()
+
+
+class WithdrawalResponse(BaseModel):
+    """Respuesta de solicitud de retiro."""
+    success: bool
+    transaction_id: Optional[UUID] = None
+    tx_hash: Optional[str] = None
+    status: str  # pending, submitted, confirmed, failed
+    amount: Decimal
+    fee: Decimal
+    net_amount: Decimal  # amount - fee
+    to_address: str
+    estimated_confirmation_time: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+
+
+class WithdrawalFeeEstimate(BaseModel):
+    """Estimación de fees para retiro."""
+    network_fee: Decimal  # Gas fee
+    platform_fee: Decimal  # Fee de FinCore
+    total_fee: Decimal
+    net_amount: Decimal  # Monto que recibirá el usuario
+    fee_currency: str  # MATIC, ETH, etc.
+    estimated_usd: Decimal
+
+
+# ==================== DEPOSIT SCHEMAS ====================
+
+class DepositAddressResponse(BaseModel):
+    """Dirección de depósito del usuario."""
+    address: str
+    network: str
+    currency_symbol: str  # MATIC, ETH, USDC, etc.
+    qr_code_base64: Optional[str] = None
+    minimum_deposit: Decimal
+    confirmations_required: int
+    warning: Optional[str] = None  # "Solo envía [TOKEN] en la red [NETWORK]"
+
+
+class DepositHistoryItem(BaseModel):
+    """Item del historial de depósitos."""
+    id: UUID
+    tx_hash: str
+    amount: Decimal
+    token_symbol: str
+    token_address: Optional[str]
+    network: str
+    status: str
+    confirmations: int
+    confirmations_required: int
+    from_address: str
+    created_at: datetime
+    confirmed_at: Optional[datetime]
+
+
+class DepositHistoryResponse(BaseModel):
+    """Historial de depósitos."""
+    deposits: List[DepositHistoryItem]
+    total: int
+    pending_count: int
+    total_deposited_usd: Decimal
+
+
+# ==================== CONSOLIDATED BALANCE SCHEMAS ====================
+
+class TokenBalance(BaseModel):
+    """Balance de un token específico."""
+    symbol: str
+    name: str
+    contract_address: Optional[str]
+    balance: Decimal
+    balance_usd: Decimal
+    price_usd: Decimal
+    change_24h: Optional[Decimal] = None
+    logo_url: Optional[str] = None
+
+
+class WalletConsolidatedBalance(BaseModel):
+    """Balance consolidado de una wallet."""
+    wallet_id: UUID
+    wallet_address: str
+    wallet_label: Optional[str]
+    is_custodial: bool
+    network: str
+    native_balance: Decimal
+    native_balance_usd: Decimal
+    tokens: List[TokenBalance]
+    total_balance_usd: Decimal
+
+
+class ConsolidatedBalanceResponse(BaseModel):
+    """Respuesta de balances consolidados del usuario."""
+    total_balance_usd: Decimal
+    change_24h_usd: Optional[Decimal] = None
+    change_24h_percent: Optional[Decimal] = None
+    wallets: List[WalletConsolidatedBalance]
+    top_assets: List[TokenBalance]  # Top 5 por valor
+    last_updated: datetime

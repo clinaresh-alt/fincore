@@ -94,10 +94,24 @@ export default function WalletPage() {
             Gestiona tus wallets y tokens
           </p>
         </div>
-        <Button onClick={handleCreateWallet} disabled={createWalletMutation.isPending}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva wallet
-        </Button>
+        <div className="flex items-center gap-2">
+          <Link href="/wallet/deposit">
+            <Button variant="outline">
+              <ArrowDownLeft className="h-4 w-4 mr-2" />
+              Depositar
+            </Button>
+          </Link>
+          <Link href="/wallet/withdraw">
+            <Button variant="outline">
+              <ArrowUpRight className="h-4 w-4 mr-2" />
+              Retirar
+            </Button>
+          </Link>
+          <Button onClick={handleCreateWallet} disabled={createWalletMutation.isPending}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva wallet
+          </Button>
+        </div>
       </div>
 
       {/* Wallets Grid */}

@@ -1,10 +1,12 @@
 """
 Endpoints de Autenticacion con MFA.
 Implementa login de 2 fases y gestion de tokens.
+Incluye device fingerprinting y gestión de sesiones.
 """
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -15,14 +17,19 @@ from app.core.config import settings
 from app.core.security import (
     hash_password, verify_password,
     create_access_token, create_refresh_token, create_mfa_pending_token,
+    create_password_reset_token,
     decode_token, generate_mfa_secret, generate_mfa_qr_code, verify_mfa_code
 )
 from app.models.user import User, UserRole
 from app.models.audit import AuditLog, AuditAction
 from app.schemas.user import (
     UserCreate, UserLogin, UserResponse, TokenResponse,
-    MFASetup, MFAVerify
+    MFASetup, MFAVerify, ForgotPasswordRequest, ResetPasswordRequest
 )
+from app.services.email_service import email_service
+from app.services.device_service import DeviceService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Autenticacion"])
 
@@ -146,6 +153,7 @@ async def login(
     """
     Login fase 1: Email + Password.
     Si MFA esta habilitado, retorna token temporal para fase 2.
+    Incluye device fingerprinting y gestión de sesiones.
     """
     # Buscar usuario
     user = db.query(User).filter(User.email == form_data.username).first()
@@ -163,6 +171,13 @@ async def login(
             detail=f"Cuenta bloqueada hasta {user.bloqueado_hasta}"
         )
 
+    # Obtener IP del cliente
+    ip_address = request.client.host if request.client else "127.0.0.1"
+    # Considerar headers de proxy (X-Forwarded-For)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        ip_address = forwarded_for.split(",")[0].strip()
+
     # Verificar password
     if not verify_password(form_data.password, user.password_hash):
         user.intentos_fallidos += 1
@@ -179,7 +194,7 @@ async def login(
         audit = AuditLog(
             user_id=user.id,
             action=AuditAction.LOGIN_FAILED,
-            ip_address=request.client.host if request.client else None,
+            ip_address=ip_address,
             description=f"Intento fallido #{user.intentos_fallidos}"
         )
         db.add(audit)
@@ -193,9 +208,10 @@ async def login(
     # Password correcto - resetear intentos
     user.intentos_fallidos = 0
 
-    # Si MFA habilitado, retornar token temporal
+    # Si MFA habilitado, retornar token temporal (device tracking se hace después de MFA)
     if user.mfa_enabled:
         mfa_token = create_mfa_pending_token(str(user.id))
+        # Guardar datos de device en el token para procesarlo después de MFA
         db.commit()
 
         return TokenResponse(
@@ -211,13 +227,71 @@ async def login(
     refresh_token = create_refresh_token({"sub": str(user.id)})
 
     user.ultimo_login = datetime.utcnow()
+
+    # === Device Tracking ===
+    try:
+        device_service = DeviceService(db)
+        user_agent = request.headers.get("User-Agent", "")
+        accept_language = request.headers.get("Accept-Language")
+
+        # Generar fingerprint del dispositivo
+        fingerprint = device_service.generate_device_fingerprint(
+            user_agent=user_agent,
+            ip_address=ip_address,
+            accept_language=accept_language
+        )
+
+        # Obtener o crear dispositivo
+        device, is_new_device = await device_service.get_or_create_device(
+            user=user,
+            fingerprint=fingerprint,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
+        # Crear sesión
+        session = device_service.create_session(
+            user=user,
+            device=device,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            ip_address=ip_address
+        )
+
+        # Notificar si es nuevo dispositivo
+        if is_new_device:
+            audit_new = AuditLog(
+                user_id=user.id,
+                action=AuditAction.NEW_DEVICE_DETECTED,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                description=f"Nuevo dispositivo: {device.browser_name} en {device.os_name}, IP: {ip_address}"
+            )
+            db.add(audit_new)
+
+            # Enviar notificación por email (async en background)
+            try:
+                email_service.send_new_device_notification(
+                    email=user.email,
+                    device_name=f"{device.browser_name or 'Navegador'} en {device.os_name or 'Sistema'}",
+                    location=f"{device.last_city or 'Desconocido'}, {device.last_country or 'Desconocido'}",
+                    ip_address=ip_address,
+                    login_time=datetime.utcnow().isoformat()
+                )
+            except Exception as e:
+                logger.warning(f"Error enviando notificación de nuevo dispositivo: {e}")
+
+    except Exception as e:
+        logger.error(f"Error en device tracking durante login: {e}")
+        # No bloquear login si falla device tracking
+
     db.commit()
 
     # Audit
     audit = AuditLog(
         user_id=user.id,
         action=AuditAction.LOGIN,
-        ip_address=request.client.host if request.client else None
+        ip_address=ip_address
     )
     db.add(audit)
     db.commit()
@@ -238,6 +312,7 @@ async def verify_mfa(
 ):
     """
     Login fase 2: Verificar codigo MFA (TOTP).
+    Incluye device tracking después de verificación exitosa.
     """
     # Decodificar token temporal
     payload = decode_token(mfa_data.mfa_token)
@@ -256,6 +331,12 @@ async def verify_mfa(
             detail="Usuario no encontrado"
         )
 
+    # Obtener IP del cliente
+    ip_address = request.client.host if request.client else "127.0.0.1"
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        ip_address = forwarded_for.split(",")[0].strip()
+
     # Verificar codigo TOTP
     if not verify_mfa_code(user.mfa_secret, mfa_data.code):
         raise HTTPException(
@@ -268,13 +349,70 @@ async def verify_mfa(
     refresh_token = create_refresh_token({"sub": str(user.id)})
 
     user.ultimo_login = datetime.utcnow()
+
+    # === Device Tracking (después de MFA exitoso) ===
+    try:
+        device_service = DeviceService(db)
+        user_agent = request.headers.get("User-Agent", "")
+        accept_language = request.headers.get("Accept-Language")
+
+        # Generar fingerprint del dispositivo
+        fingerprint = device_service.generate_device_fingerprint(
+            user_agent=user_agent,
+            ip_address=ip_address,
+            accept_language=accept_language
+        )
+
+        # Obtener o crear dispositivo
+        device, is_new_device = await device_service.get_or_create_device(
+            user=user,
+            fingerprint=fingerprint,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
+        # Crear sesión
+        session = device_service.create_session(
+            user=user,
+            device=device,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            ip_address=ip_address
+        )
+
+        # Notificar si es nuevo dispositivo
+        if is_new_device:
+            audit_new = AuditLog(
+                user_id=user.id,
+                action=AuditAction.NEW_DEVICE_DETECTED,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                description=f"Nuevo dispositivo: {device.browser_name} en {device.os_name}, IP: {ip_address}"
+            )
+            db.add(audit_new)
+
+            # Enviar notificación por email
+            try:
+                email_service.send_new_device_notification(
+                    email=user.email,
+                    device_name=f"{device.browser_name or 'Navegador'} en {device.os_name or 'Sistema'}",
+                    location=f"{device.last_city or 'Desconocido'}, {device.last_country or 'Desconocido'}",
+                    ip_address=ip_address,
+                    login_time=datetime.utcnow().isoformat()
+                )
+            except Exception as e:
+                logger.warning(f"Error enviando notificación de nuevo dispositivo: {e}")
+
+    except Exception as e:
+        logger.error(f"Error en device tracking durante MFA verify: {e}")
+
     db.commit()
 
     # Audit
     audit = AuditLog(
         user_id=user.id,
         action=AuditAction.MFA_VERIFIED,
-        ip_address=request.client.host if request.client else None
+        ip_address=ip_address
     )
     db.add(audit)
     db.commit()
@@ -445,3 +583,112 @@ async def logout(
     db.commit()
 
     return {"message": "Sesion cerrada"}
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Solicita recuperación de contraseña.
+    Genera un token y lo retorna (en producción, enviarlo por email).
+    """
+    # Buscar usuario por email
+    user = db.query(User).filter(User.email == data.email).first()
+
+    # Siempre retornar éxito (no revelar si el email existe)
+    if not user:
+        return {
+            "message": "Si el email existe, recibirás instrucciones para restablecer tu contraseña",
+            "success": True
+        }
+
+    # Generar token de reset
+    reset_token = create_password_reset_token(str(user.id))
+
+    # Enviar email con el link de reset
+    email_sent = email_service.send_password_reset_email(user.email, reset_token)
+
+    # Audit log
+    audit = AuditLog(
+        user_id=user.id,
+        action=AuditAction.PASSWORD_RESET_REQUESTED,
+        ip_address=request.client.host if request.client else None,
+        description=f"Solicitud de recuperación de contraseña. Email enviado: {email_sent}"
+    )
+    db.add(audit)
+    db.commit()
+
+    response = {
+        "message": "Si el email existe, recibirás instrucciones para restablecer tu contraseña",
+        "success": True
+    }
+
+    # En modo debug, incluir URL para desarrollo (cuando SendGrid no está configurado)
+    if settings.DEBUG and not email_service.is_configured():
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={reset_token}"
+        response["debug_reset_url"] = reset_url
+
+    return response
+
+
+@router.post("/reset-password")
+async def reset_password(
+    request: Request,
+    data: ResetPasswordRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Restablece la contraseña usando el token de recuperación.
+    """
+    # Decodificar token
+    payload = decode_token(data.token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido o expirado"
+        )
+
+    # Verificar tipo de token
+    if payload.get("type") != "password_reset":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido"
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido"
+        )
+
+    # Buscar usuario
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado"
+        )
+
+    # Actualizar contraseña
+    user.password_hash = hash_password(data.new_password)
+    user.intentos_fallidos = 0  # Reset intentos
+    user.bloqueado_hasta = None  # Desbloquear si estaba bloqueado
+
+    # Audit log
+    audit = AuditLog(
+        user_id=user.id,
+        action=AuditAction.PASSWORD_CHANGED,
+        ip_address=request.client.host if request.client else None,
+        description="Contraseña restablecida mediante token de recuperación"
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": "Contraseña actualizada exitosamente",
+        "success": True
+    }

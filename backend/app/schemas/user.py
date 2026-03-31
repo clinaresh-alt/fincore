@@ -125,3 +125,31 @@ class TaxValidationResponse(BaseModel):
     verification_date: datetime
     kyc_score: Optional[int]
     message: Optional[str]
+
+
+# === PASSWORD RECOVERY ===
+
+class ForgotPasswordRequest(BaseModel):
+    """Request para solicitar recuperación de contraseña."""
+    email: EmailStr
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email": "usuario@ejemplo.com"
+            }
+        }
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request para restablecer contraseña con token."""
+    token: str
+    new_password: str = Field(..., min_length=8, max_length=100)
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "token": "abc123...",
+                "new_password": "NuevaSecurePass123!"
+            }
+        }

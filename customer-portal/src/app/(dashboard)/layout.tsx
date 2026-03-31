@@ -13,18 +13,21 @@ import {
   LogOut,
   Menu,
   X,
+  BarChart3,
+  HelpCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { NotificationsDropdown } from "@/components/notifications/notifications-dropdown";
+import { ChatWidget } from "@/components/chat-widget";
 
 const navigation = [
   { name: "Inicio", href: "/", icon: Home },
   { name: "Enviar", href: "/remittances/new", icon: SendHorizontal },
   { name: "Wallet", href: "/wallet", icon: Wallet },
-  { name: "Beneficiarios", href: "/beneficiaries", icon: Users },
-  { name: "Seguridad", href: "/security", icon: Shield },
+  { name: "Marketplace", href: "/marketplace", icon: BarChart3 },
+  { name: "Soporte", href: "/support", icon: HelpCircle },
 ];
 
 export default function DashboardLayout({
@@ -217,6 +220,9 @@ export default function DashboardLayout({
           })}
         </div>
       </nav>
+
+      {/* Live Chat Widget */}
+      <ChatWidget />
     </div>
   );
 }

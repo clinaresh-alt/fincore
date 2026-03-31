@@ -94,6 +94,23 @@ def create_mfa_pending_token(user_id: str) -> str:
     )
 
 
+def create_password_reset_token(user_id: str) -> str:
+    """
+    Token para recuperación de contraseña.
+    Expira en 1 hora.
+    """
+    to_encode = {
+        "sub": user_id,
+        "exp": datetime.utcnow() + timedelta(hours=1),
+        "type": "password_reset"
+    }
+    return jwt.encode(
+        to_encode,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM
+    )
+
+
 def decode_token(token: str) -> Optional[dict]:
     """Decodifica y valida un JWT."""
     try:
@@ -177,3 +194,137 @@ def decrypt_sensitive_data(encrypted_data: str) -> str:
     """Descifra datos sensibles."""
     fernet = Fernet(_get_fernet_key())
     return fernet.decrypt(encrypted_data.encode()).decode()
+
+
+# Aliases para compatibilidad
+encrypt_data = encrypt_sensitive_data
+decrypt_data = decrypt_sensitive_data
+
+
+# ============ Dependencia de autenticación FastAPI ============
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/auth/login")
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(lambda: None)  # Se inyecta get_db en el endpoint
+):
+    """
+    Dependencia de FastAPI para obtener el usuario actual desde JWT.
+    Se usa como: current_user: User = Depends(get_current_user)
+    """
+    from app.core.database import get_db
+    from app.models.user import User
+
+    # Obtener sesión de DB correctamente
+    db_gen = get_db()
+    db = next(db_gen)
+
+    try:
+        payload = decode_token(token)
+        if payload is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido o expirado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Verificar tipo de token
+        token_type = payload.get("type")
+        if token_type != "access":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Tipo de token inválido",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuario no encontrado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuario desactivado"
+            )
+
+        return user
+    finally:
+        try:
+            next(db_gen)
+        except StopIteration:
+            pass
+
+
+# ============ HIBP (Have I Been Pwned) Password Check ============
+import httpx
+import hashlib as _hashlib
+
+
+async def check_password_hibp(password: str) -> tuple[bool, int]:
+    """
+    Verifica si una contraseña ha sido comprometida usando la API de HIBP.
+
+    Usa el modelo k-anonymity: solo envía los primeros 5 caracteres del hash SHA-1.
+
+    Returns:
+        tuple: (is_compromised, count) - Si está comprometida y cuántas veces
+    """
+    # Calcular SHA-1 de la contraseña
+    sha1_hash = _hashlib.sha1(password.encode()).hexdigest().upper()
+    prefix = sha1_hash[:5]
+    suffix = sha1_hash[5:]
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.pwnedpasswords.com/range/{prefix}",
+                headers={"User-Agent": "FinCore-Security-Check"},
+                timeout=5.0
+            )
+
+            if response.status_code != 200:
+                # Si falla la API, no bloquear al usuario
+                return (False, 0)
+
+            # Buscar el sufijo en la respuesta
+            hashes = response.text.splitlines()
+            for line in hashes:
+                parts = line.split(":")
+                if len(parts) == 2 and parts[0] == suffix:
+                    count = int(parts[1])
+                    return (True, count)
+
+            return (False, 0)
+
+    except Exception:
+        # Si hay error de red, no bloquear
+        return (False, 0)
+
+
+def check_password_hibp_sync(password: str) -> tuple[bool, int]:
+    """Versión síncrona del check HIBP."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(check_password_hibp(password))
+    except RuntimeError:
+        # Si no hay event loop, crear uno nuevo
+        return asyncio.run(check_password_hibp(password))

@@ -166,6 +166,13 @@ class Settings(BaseSettings):
     COMPLIANCE_ALERT_EMAIL: str = ""
     COMPLIANCE_WEBHOOK_URL: str = ""
 
+    # ==================== EMAIL (SendGrid) ====================
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = "noreply@fincore.com"
+    SENDGRID_FROM_NAME: str = "FinCore"
+    # URL base del frontend para links en emails
+    FRONTEND_URL: str = "http://localhost:3001"
+
     # ==================== STP (SPEI) ====================
     # Configuracion de STP para transferencias SPEI
     STP_API_URL: str = "https://demo.stpmex.com/speiws/rest"
@@ -209,6 +216,49 @@ class Settings(BaseSettings):
     ETHEREUM_SEPOLIA_CHAIN_ID: int = 11155111
     ARBITRUM_CHAIN_ID: int = 42161
     BASE_CHAIN_ID: int = 8453
+
+    # ==================== INFRASTRUCTURE ====================
+    # Environment
+    ENVIRONMENT: str = "development"  # development, staging, production
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"  # json or text
+
+    # AWS Secrets Manager
+    AWS_SECRETS_MANAGER_ENABLED: bool = False
+    SECRETS_BACKEND: str = "env"  # env, aws, vault
+    SECRETS_CACHE_TTL: int = 300
+    SECRETS_PREFIX: str = "fincore"
+
+    # HashiCorp Vault (alternativa a AWS)
+    VAULT_ADDR: str = ""
+    VAULT_TOKEN: str = ""
+    VAULT_MOUNT: str = "secret"
+
+    # Cloudflare WAF
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_ZONE_ID: str = ""
+    WAF_VERIFY_CF_IP: bool = True
+    WAF_REQUIRE_CF_HEADERS: bool = True
+    WAF_ALLOW_PRIVATE_IPS: bool = True  # True for development
+    WAF_RATE_LIMIT_REQUESTS: int = 100
+    WAF_RATE_LIMIT_WINDOW: int = 60
+    WAF_BLOCKED_COUNTRIES: str = ""  # Comma-separated country codes
+
+    # PagerDuty Alerting
+    PAGERDUTY_ROUTING_KEY: str = ""
+    SLACK_WEBHOOK_URL: str = ""
+    ALERT_WEBHOOK_URL: str = ""
+
+    # Circuit Breaker defaults
+    CB_FAILURE_THRESHOLD: int = 5
+    CB_SUCCESS_THRESHOLD: int = 3
+    CB_TIMEOUT_SECONDS: int = 30
+
+    # Degraded Mode
+    DEGRADED_MODE_THRESHOLD: int = 2
+    EMERGENCY_MODE_THRESHOLD: int = 4
 
     class Config:
         env_file = ".env"

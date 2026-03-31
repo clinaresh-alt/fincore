@@ -49,7 +49,28 @@ from app.schemas.blockchain import (
     GasEstimateResponse,
     BlockchainNetworkEnum,
     TransactionStatusEnum,
+    # Nuevos schemas para retiro/depósito
+    WithdrawalRequest,
+    WithdrawalResponse,
+    WithdrawalFeeEstimate,
+    DepositAddressResponse,
+    DepositHistoryResponse,
+    DepositHistoryItem,
+    ConsolidatedBalanceResponse,
+    WalletConsolidatedBalance,
+    TokenBalance,
 )
+from app.models.security import WithdrawalWhitelist, WhitelistStatus, AccountFreeze
+from app.models.audit import AuditLog, AuditAction
+from app.core.security import verify_mfa_code
+import hashlib
+import qrcode
+import qrcode.image.svg
+from io import BytesIO
+import base64
+import logging
+
+logger = logging.getLogger(__name__)
 from app.services.blockchain_service import (
     BlockchainService,
     get_blockchain_service,
@@ -966,3 +987,516 @@ async def get_kyc_status(
         )
 
     return record
+
+
+# ==================== WITHDRAWAL ENDPOINTS ====================
+
+# Constantes para retiros
+MFA_REQUIRED_THRESHOLD_USD = Decimal("100")  # MFA requerido para retiros > $100
+PLATFORM_FEE_PERCENT = Decimal("0.001")  # 0.1% fee de plataforma
+MIN_WITHDRAWAL = {
+    "polygon": Decimal("1"),  # 1 MATIC mínimo
+    "ethereum": Decimal("0.01"),  # 0.01 ETH mínimo
+}
+
+
+def _check_account_frozen(user_id: UUID, db: Session) -> bool:
+    """Verifica si la cuenta está congelada."""
+    freeze = db.query(AccountFreeze).filter(
+        and_(
+            AccountFreeze.user_id == user_id,
+            AccountFreeze.is_active == True
+        )
+    ).first()
+    return freeze is not None
+
+
+def _verify_whitelist(user_id: UUID, address: str, db: Session) -> WithdrawalWhitelist:
+    """Verifica que la dirección esté en whitelist y activa."""
+    address_hash = hashlib.sha256(address.lower().encode()).hexdigest()
+
+    whitelist_entry = db.query(WithdrawalWhitelist).filter(
+        and_(
+            WithdrawalWhitelist.user_id == user_id,
+            WithdrawalWhitelist.address_hash == address_hash
+        )
+    ).first()
+
+    if not whitelist_entry:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dirección no está en tu whitelist. Agrégala primero en Configuración > Seguridad."
+        )
+
+    if whitelist_entry.status == WhitelistStatus.PENDING:
+        hours_remaining = (whitelist_entry.quarantine_ends_at.replace(tzinfo=None) - datetime.utcnow()).total_seconds() / 3600
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Dirección en cuarentena. Disponible en {max(0, hours_remaining):.1f} horas."
+        )
+
+    if whitelist_entry.status != WhitelistStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Dirección no activa. Estado: {whitelist_entry.status.value}"
+        )
+
+    return whitelist_entry
+
+
+@router.get("/withdraw/fee-estimate", response_model=WithdrawalFeeEstimate)
+async def estimate_withdrawal_fee(
+    amount: Decimal = Query(..., gt=0),
+    network: BlockchainNetworkEnum = BlockchainNetworkEnum.POLYGON,
+    token_address: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Estima los fees para un retiro.
+    """
+    service = get_blockchain_service(BlockchainNetwork(network.value))
+    config = NETWORK_CONFIGS[BlockchainNetwork(network.value)]
+
+    # Estimar gas
+    gas_estimate = service.estimate_gas(to_address=token_address)
+
+    # Fee de red (en token nativo)
+    network_fee = gas_estimate.estimated_cost_native
+
+    # Fee de plataforma (0.1% del monto)
+    platform_fee = amount * PLATFORM_FEE_PERCENT
+
+    # Total fee
+    total_fee = network_fee + platform_fee
+    net_amount = amount - total_fee
+
+    return WithdrawalFeeEstimate(
+        network_fee=network_fee,
+        platform_fee=platform_fee,
+        total_fee=total_fee,
+        net_amount=max(Decimal("0"), net_amount),
+        fee_currency=config.currency_symbol,
+        estimated_usd=gas_estimate.estimated_cost_usd + (platform_fee * Decimal("1"))  # Simplificado
+    )
+
+
+@router.post("/withdraw", response_model=WithdrawalResponse)
+async def withdraw_crypto(
+    withdrawal: WithdrawalRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retiro de crypto a dirección whitelisted.
+
+    Validaciones:
+    - Cuenta no congelada
+    - Dirección en whitelist (cuarentena 24h pasada)
+    - MFA requerido para retiros > $100 USD
+    - Balance suficiente
+    - Wallet custodial del usuario
+    """
+    # 1. Verificar cuenta no congelada
+    if _check_account_frozen(current_user.id, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tu cuenta está congelada. Contacta a soporte para descongelarla."
+        )
+
+    # 2. Verificar wallet pertenece al usuario y es custodial
+    wallet = db.query(UserWallet).filter(
+        and_(
+            UserWallet.id == withdrawal.wallet_id,
+            UserWallet.user_id == current_user.id
+        )
+    ).first()
+
+    if not wallet:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Wallet no encontrada"
+        )
+
+    if not wallet.is_custodial:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo puedes retirar desde wallets custodiales de FinCore"
+        )
+
+    # 3. Verificar whitelist
+    whitelist_entry = _verify_whitelist(current_user.id, withdrawal.to_address, db)
+
+    # 4. Verificar MFA si es necesario (retiros > $100 USD)
+    # Simplificado: asumimos que 100 MATIC ≈ $100 USD
+    if withdrawal.amount > MFA_REQUIRED_THRESHOLD_USD:
+        if not current_user.mfa_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Habilita MFA para retiros mayores a $100 USD"
+            )
+
+        if not withdrawal.mfa_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Código MFA requerido para este monto"
+            )
+
+        if not verify_mfa_code(current_user.mfa_secret, withdrawal.mfa_code):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Código MFA incorrecto"
+            )
+
+    # 5. Obtener servicio blockchain y verificar balance
+    service = get_blockchain_service(BlockchainNetwork(withdrawal.network.value))
+    config = NETWORK_CONFIGS[BlockchainNetwork(withdrawal.network.value)]
+
+    current_balance = service.get_balance(wallet.address)
+    if current_balance < withdrawal.amount:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Balance insuficiente. Tienes {current_balance} {config.currency_symbol}"
+        )
+
+    # 6. Calcular fees
+    gas_estimate = service.estimate_gas(to_address=withdrawal.to_address)
+    network_fee = gas_estimate.estimated_cost_native
+    platform_fee = withdrawal.amount * PLATFORM_FEE_PERCENT
+    total_fee = network_fee + platform_fee
+    net_amount = withdrawal.amount - total_fee
+
+    if net_amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Monto muy pequeño. Los fees exceden el monto a retirar."
+        )
+
+    # 7. Ejecutar transferencia
+    try:
+        from app.services.encryption_service import decrypt_private_key
+
+        # Desencriptar llave privada
+        private_key = decrypt_private_key(wallet.encrypted_private_key)
+
+        # Enviar transacción
+        tx_hash = service.send_native_token(
+            from_address=wallet.address,
+            to_address=withdrawal.to_address,
+            amount=net_amount,
+            private_key=private_key
+        )
+
+        # Registrar transacción en DB
+        transaction = BlockchainTransaction(
+            user_id=current_user.id,
+            wallet_id=wallet.id,
+            network=BlockchainNetwork(withdrawal.network.value),
+            tx_type="withdrawal",
+            tx_hash=tx_hash,
+            from_address=wallet.address,
+            to_address=withdrawal.to_address,
+            value=net_amount,
+            status=TransactionStatus.SUBMITTED,
+            gas_price=Decimal(str(gas_estimate.gas_price_gwei)),
+            description=f"Retiro de {net_amount} {config.currency_symbol}"
+        )
+        db.add(transaction)
+
+        # Actualizar whitelist
+        whitelist_entry.times_used += 1
+        whitelist_entry.last_used_at = datetime.utcnow()
+        whitelist_entry.total_withdrawn = str(
+            Decimal(whitelist_entry.total_withdrawn or "0") + net_amount
+        )
+
+        # Audit log
+        audit = AuditLog(
+            user_id=current_user.id,
+            action=AuditAction.WHITELIST_ADDRESS_USED,
+            resource_type="withdrawal",
+            resource_id=transaction.id,
+            description=f"Retiro de {net_amount} {config.currency_symbol} a {withdrawal.to_address[:10]}..."
+        )
+        db.add(audit)
+
+        db.commit()
+        db.refresh(transaction)
+
+        return WithdrawalResponse(
+            success=True,
+            transaction_id=transaction.id,
+            tx_hash=tx_hash,
+            status="submitted",
+            amount=withdrawal.amount,
+            fee=total_fee,
+            net_amount=net_amount,
+            to_address=withdrawal.to_address,
+            estimated_confirmation_time="~30 segundos",
+            message=f"Retiro enviado. TX: {tx_hash[:20]}..."
+        )
+
+    except Exception as e:
+        logger.error(f"Error en retiro: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error procesando retiro: {str(e)}"
+        )
+
+
+# ==================== DEPOSIT ENDPOINTS ====================
+
+@router.get("/deposit/address", response_model=DepositAddressResponse)
+async def get_deposit_address(
+    network: BlockchainNetworkEnum = BlockchainNetworkEnum.POLYGON,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene la dirección de depósito del usuario.
+    Si no tiene wallet custodial, crea una automáticamente.
+    """
+    net = BlockchainNetwork(network.value)
+    config = NETWORK_CONFIGS[net]
+
+    # Buscar wallet custodial existente
+    wallet = db.query(UserWallet).filter(
+        and_(
+            UserWallet.user_id == current_user.id,
+            UserWallet.is_custodial == True,
+            UserWallet.preferred_network == net
+        )
+    ).first()
+
+    # Si no existe, crear una
+    if not wallet:
+        from app.services.encryption_service import encrypt_private_key
+
+        service = get_blockchain_service(net)
+        address, private_key = service.create_wallet()
+        encrypted_key = encrypt_private_key(private_key)
+
+        wallet = UserWallet(
+            user_id=current_user.id,
+            address=address.lower(),
+            wallet_type="custodial",
+            label=f"Wallet de Depósito ({config.name})",
+            preferred_network=net,
+            is_primary=True,
+            is_custodial=True,
+            is_verified=True,
+            verified_at=datetime.utcnow(),
+            encrypted_private_key=encrypted_key
+        )
+        db.add(wallet)
+        db.commit()
+        db.refresh(wallet)
+
+    # Generar QR code
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(wallet.address)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+    # Confirmaciones según red
+    confirmations_map = {
+        "polygon": 128,
+        "ethereum": 12,
+        "arbitrum": 64,
+        "base": 64,
+    }
+
+    return DepositAddressResponse(
+        address=wallet.address,
+        network=network.value,
+        currency_symbol=config.currency_symbol,
+        qr_code_base64=qr_base64,
+        minimum_deposit=MIN_WITHDRAWAL.get(network.value, Decimal("0.01")),
+        confirmations_required=confirmations_map.get(network.value, 12),
+        warning=f"Solo envía {config.currency_symbol} y tokens en la red {config.name}. Enviar otros activos puede resultar en pérdida de fondos."
+    )
+
+
+@router.get("/deposit/history", response_model=DepositHistoryResponse)
+async def get_deposit_history(
+    network: Optional[BlockchainNetworkEnum] = None,
+    limit: int = Query(default=50, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el historial de depósitos del usuario.
+    """
+    # Obtener wallets del usuario
+    wallets_query = db.query(UserWallet).filter(
+        UserWallet.user_id == current_user.id
+    )
+
+    if network:
+        wallets_query = wallets_query.filter(
+            UserWallet.preferred_network == BlockchainNetwork(network.value)
+        )
+
+    wallet_ids = [w.id for w in wallets_query.all()]
+
+    if not wallet_ids:
+        return DepositHistoryResponse(
+            deposits=[],
+            total=0,
+            pending_count=0,
+            total_deposited_usd=Decimal("0")
+        )
+
+    # Buscar transacciones de depósito (tx_type = 'deposit' o transacciones entrantes)
+    query = db.query(BlockchainTransaction).filter(
+        and_(
+            BlockchainTransaction.wallet_id.in_(wallet_ids),
+            BlockchainTransaction.tx_type == "deposit"
+        )
+    )
+
+    total = query.count()
+    pending_count = query.filter(
+        BlockchainTransaction.status.in_([TransactionStatus.PENDING, TransactionStatus.SUBMITTED])
+    ).count()
+
+    transactions = query.order_by(
+        BlockchainTransaction.created_at.desc()
+    ).offset(offset).limit(limit).all()
+
+    # Calcular total depositado (simplificado)
+    total_deposited = sum(t.value for t in transactions if t.status == TransactionStatus.CONFIRMED)
+
+    deposits = []
+    for tx in transactions:
+        config = NETWORK_CONFIGS.get(tx.network, NETWORK_CONFIGS[BlockchainNetwork.POLYGON])
+        deposits.append(DepositHistoryItem(
+            id=tx.id,
+            tx_hash=tx.tx_hash or "",
+            amount=tx.value,
+            token_symbol=config.currency_symbol if not tx.token_address else "TOKEN",
+            token_address=tx.token_address,
+            network=tx.network.value,
+            status=tx.status.value,
+            confirmations=tx.confirmations,
+            confirmations_required=12,
+            from_address=tx.from_address,
+            created_at=tx.created_at,
+            confirmed_at=tx.confirmed_at
+        ))
+
+    return DepositHistoryResponse(
+        deposits=deposits,
+        total=total,
+        pending_count=pending_count,
+        total_deposited_usd=total_deposited  # Simplificado, debería convertir a USD
+    )
+
+
+# ==================== CONSOLIDATED BALANCE ENDPOINTS ====================
+
+@router.get("/balances", response_model=ConsolidatedBalanceResponse)
+async def get_consolidated_balances(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene los balances consolidados de todas las wallets del usuario.
+    """
+    wallets = db.query(UserWallet).filter(
+        UserWallet.user_id == current_user.id
+    ).all()
+
+    wallet_balances = []
+    all_tokens = []
+    total_usd = Decimal("0")
+
+    for wallet in wallets:
+        try:
+            net = wallet.preferred_network
+            config = NETWORK_CONFIGS.get(net, NETWORK_CONFIGS[BlockchainNetwork.POLYGON])
+            service = get_blockchain_service(net)
+
+            # Balance nativo
+            native_balance = service.get_balance(wallet.address)
+            # Precio simplificado (en producción usar oracle o API de precios)
+            native_price = Decimal("0.5") if "polygon" in net.value else Decimal("2000")
+            native_usd = native_balance * native_price
+
+            # Holdings de tokens del proyecto
+            holdings = db.query(TokenHolding).filter(
+                TokenHolding.wallet_id == wallet.id
+            ).all()
+
+            tokens = []
+            wallet_total = native_usd
+
+            # Token nativo
+            native_token = TokenBalance(
+                symbol=config.currency_symbol,
+                name=config.name,
+                contract_address=None,
+                balance=native_balance,
+                balance_usd=native_usd,
+                price_usd=native_price,
+                change_24h=None,
+                logo_url=None
+            )
+            tokens.append(native_token)
+            all_tokens.append(native_token)
+
+            # Tokens de proyectos
+            for holding in holdings:
+                if holding.balance > 0:
+                    token = db.query(ProjectToken).get(holding.project_token_id)
+                    if token:
+                        token_usd = holding.balance * token.price_per_token
+                        wallet_total += token_usd
+
+                        token_balance = TokenBalance(
+                            symbol=token.token_symbol,
+                            name=token.token_name,
+                            contract_address=token.token_address,
+                            balance=holding.balance,
+                            balance_usd=token_usd,
+                            price_usd=token.price_per_token,
+                            change_24h=None,
+                            logo_url=None
+                        )
+                        tokens.append(token_balance)
+                        all_tokens.append(token_balance)
+
+            total_usd += wallet_total
+
+            wallet_balances.append(WalletConsolidatedBalance(
+                wallet_id=wallet.id,
+                wallet_address=wallet.address,
+                wallet_label=wallet.label,
+                is_custodial=wallet.is_custodial,
+                network=net.value,
+                native_balance=native_balance,
+                native_balance_usd=native_usd,
+                tokens=tokens,
+                total_balance_usd=wallet_total
+            ))
+
+        except Exception as e:
+            logger.warning(f"Error obteniendo balance de wallet {wallet.id}: {e}")
+            continue
+
+    # Top 5 assets por valor
+    all_tokens.sort(key=lambda x: x.balance_usd, reverse=True)
+    top_assets = all_tokens[:5]
+
+    return ConsolidatedBalanceResponse(
+        total_balance_usd=total_usd,
+        change_24h_usd=None,
+        change_24h_percent=None,
+        wallets=wallet_balances,
+        top_assets=top_assets,
+        last_updated=datetime.utcnow()
+    )

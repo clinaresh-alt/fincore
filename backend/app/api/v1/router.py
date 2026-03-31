@@ -4,7 +4,13 @@ Agrupa todos los endpoints.
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, projects, investor, admin, sector_metrics, companies, blockchain, audit, compliance, deployments, notifications, analytics, remittances, reconciliation, stp, jobs, webhooks, dashboard
+from app.api.v1.endpoints import (
+    auth, projects, investor, admin, sector_metrics, companies, blockchain,
+    audit, compliance, deployments, notifications, analytics, remittances,
+    reconciliation, stp, jobs, webhooks, dashboard, security, marketplace,
+    api_keys, support, health,
+    fincore_pay, fincore_earn, debit_card, lending
+)
 
 api_router = APIRouter()
 
@@ -27,3 +33,14 @@ api_router.include_router(stp.router)
 api_router.include_router(jobs.router, prefix="/admin", tags=["Job Queue"])
 api_router.include_router(webhooks.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(security.router)
+api_router.include_router(marketplace.router)
+api_router.include_router(api_keys.router)
+api_router.include_router(support.router)
+api_router.include_router(health.router)
+
+# Servicios Financieros - Fase 7
+api_router.include_router(fincore_pay.router)
+api_router.include_router(fincore_earn.router)
+api_router.include_router(debit_card.router)
+api_router.include_router(lending.router)
