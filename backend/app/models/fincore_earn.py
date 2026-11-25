@@ -195,7 +195,7 @@ class EarnPosition(Base):
     renewal_count = Column(Integer, default=0)
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -292,7 +292,7 @@ class EarnTransaction(Base):
     description = Column(String(255))
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

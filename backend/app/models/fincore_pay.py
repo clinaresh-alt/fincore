@@ -92,7 +92,7 @@ class P2PTransfer(Base):
     payment_request_id = Column(UUID(as_uuid=True), ForeignKey("payment_requests.id"), nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -165,7 +165,7 @@ class PaymentRequest(Base):
     transfer_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

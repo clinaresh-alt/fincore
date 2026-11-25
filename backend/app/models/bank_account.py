@@ -134,7 +134,7 @@ class BankAccount(Base):
     account_number_masked = Column(String(50), nullable=True)  # Ej: ****1234
 
     # Para México (SPEI)
-    clabe = Column(String(18), nullable=True, index=True)  # CLABE interbancaria
+    clabe = Column(String(18), nullable=True)  # CLABE interbancaria
 
     # Para internacional
     swift_bic = Column(String(11), nullable=True)

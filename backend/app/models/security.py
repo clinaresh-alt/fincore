@@ -105,7 +105,7 @@ class WithdrawalWhitelist(Base):
     # Metadata adicional según tipo
     # Crypto: network, token_symbol
     # Bank: bank_name, holder_name, swift_code
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Etiqueta del usuario
     label = Column(String(100), nullable=True)

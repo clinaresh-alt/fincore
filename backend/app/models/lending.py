@@ -198,7 +198,7 @@ class Loan(Base):
     auto_repay_enabled = Column(Boolean, default=False)
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
     notes = Column(Text)
 
     # Timestamps
@@ -376,7 +376,7 @@ class LoanPayment(Base):
     status = Column(String(20), default="completed")  # pending, completed, failed, reversed
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

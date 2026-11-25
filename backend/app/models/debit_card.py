@@ -249,7 +249,7 @@ class CardTransaction(Base):
     original_transaction_id = Column(UUID(as_uuid=True), ForeignKey("card_transactions.id"))
 
     # Metadata
-    metadata = Column(JSONB, default={})
+    meta_data = Column("metadata", JSONB, default={})
     device_info = Column(JSONB, default={})
 
     # Balance después de transacción
